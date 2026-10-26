@@ -1,0 +1,14 @@
+id: lnx-log-tampering
+title: System logs wiped
+description: Log files truncated, shredded or deleted.
+level: high
+tags: [attack.defense_evasion, attack.t1070.002]
+logsource: {product: linux, category: process_creation}
+detection:
+  tools:
+    exe|endswith: [/shred, /truncate, /rm]
+  logs:
+    cmdline|contains: [/var/log/, wtmp, btmp, lastlog]
+  journal:
+    cmdline|contains: ['journalctl --vacuum', 'journalctl --rotate']
+  condition: (tools and logs) or journal

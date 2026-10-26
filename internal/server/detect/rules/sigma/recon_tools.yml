@@ -1,0 +1,12 @@
+id: lnx-offensive-tools
+title: Offensive security tool executed
+description: Scanners, brute-forcers and credential dumpers that rarely run on servers.
+level: high
+tags: [attack.discovery, attack.t1046, attack.credential_access, attack.t1110]
+logsource: {product: linux, category: process_creation}
+detection:
+  selection:
+    exe|endswith: [/nmap, /masscan, /zmap, /hydra, /medusa, /john, /hashcat, /mimipenguin, /linpeas.sh, /pspy, /pspy64, /chisel, /ligolo]
+  scripts:
+    cmdline|contains: [linpeas, linenum, les.sh, mimipenguin, 'lazagne']
+  condition: selection or scripts

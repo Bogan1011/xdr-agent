@@ -1,0 +1,11 @@
+id: lnx-systemd-service-created
+title: Systemd service created or modified
+description: A unit file was written under a systemd system directory, a common persistence mechanism.
+level: medium
+tags: [attack.persistence, attack.t1543.002]
+logsource: {product: linux, category: file_event}
+detection:
+  selection:
+    path|startswith: [/etc/systemd/system/, /lib/systemd/system/, /usr/lib/systemd/system/]
+    path|endswith: [.service, .timer]
+  condition: selection

@@ -129,8 +129,10 @@ var EnrollmentService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	AgentService_Heartbeat_FullMethodName  = "/xdr.v1.AgentService/Heartbeat"
-	AgentService_SendEvents_FullMethodName = "/xdr.v1.AgentService/SendEvents"
+	AgentService_Heartbeat_FullMethodName           = "/xdr.v1.AgentService/Heartbeat"
+	AgentService_SendEvents_FullMethodName          = "/xdr.v1.AgentService/SendEvents"
+	AgentService_GetDetectionContent_FullMethodName = "/xdr.v1.AgentService/GetDetectionContent"
+	AgentService_ReportCommandResult_FullMethodName = "/xdr.v1.AgentService/ReportCommandResult"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -143,6 +145,11 @@ type AgentServiceClient interface {
 	Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error)
 	// Unary per batch so every batch is acknowledged and can be retried.
 	SendEvents(ctx context.Context, in *EventBatch, opts ...grpc.CallOption) (*SendEventsResponse, error)
+	// Detection content (YARA rules) the agent evaluates locally. Fetched when
+	// the heartbeat reports a version different from the agent's.
+	GetDetectionContent(ctx context.Context, in *DetectionContentRequest, opts ...grpc.CallOption) (*DetectionContent, error)
+	// Outcome of a response command delivered through the heartbeat.
+	ReportCommandResult(ctx context.Context, in *CommandResult, opts ...grpc.CallOption) (*CommandResultAck, error)
 }
 
 type agentServiceClient struct {
@@ -173,6 +180,26 @@ func (c *agentServiceClient) SendEvents(ctx context.Context, in *EventBatch, opt
 	return out, nil
 }
 
+func (c *agentServiceClient) GetDetectionContent(ctx context.Context, in *DetectionContentRequest, opts ...grpc.CallOption) (*DetectionContent, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DetectionContent)
+	err := c.cc.Invoke(ctx, AgentService_GetDetectionContent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentServiceClient) ReportCommandResult(ctx context.Context, in *CommandResult, opts ...grpc.CallOption) (*CommandResultAck, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CommandResultAck)
+	err := c.cc.Invoke(ctx, AgentService_ReportCommandResult_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -183,6 +210,11 @@ type AgentServiceServer interface {
 	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error)
 	// Unary per batch so every batch is acknowledged and can be retried.
 	SendEvents(context.Context, *EventBatch) (*SendEventsResponse, error)
+	// Detection content (YARA rules) the agent evaluates locally. Fetched when
+	// the heartbeat reports a version different from the agent's.
+	GetDetectionContent(context.Context, *DetectionContentRequest) (*DetectionContent, error)
+	// Outcome of a response command delivered through the heartbeat.
+	ReportCommandResult(context.Context, *CommandResult) (*CommandResultAck, error)
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -198,6 +230,12 @@ func (UnimplementedAgentServiceServer) Heartbeat(context.Context, *HeartbeatRequ
 }
 func (UnimplementedAgentServiceServer) SendEvents(context.Context, *EventBatch) (*SendEventsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SendEvents not implemented")
+}
+func (UnimplementedAgentServiceServer) GetDetectionContent(context.Context, *DetectionContentRequest) (*DetectionContent, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetDetectionContent not implemented")
+}
+func (UnimplementedAgentServiceServer) ReportCommandResult(context.Context, *CommandResult) (*CommandResultAck, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportCommandResult not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -256,6 +294,42 @@ func _AgentService_SendEvents_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_GetDetectionContent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DetectionContentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).GetDetectionContent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_GetDetectionContent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).GetDetectionContent(ctx, req.(*DetectionContentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentService_ReportCommandResult_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CommandResult)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).ReportCommandResult(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_ReportCommandResult_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).ReportCommandResult(ctx, req.(*CommandResult))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -270,6 +344,14 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SendEvents",
 			Handler:    _AgentService_SendEvents_Handler,
+		},
+		{
+			MethodName: "GetDetectionContent",
+			Handler:    _AgentService_GetDetectionContent_Handler,
+		},
+		{
+			MethodName: "ReportCommandResult",
+			Handler:    _AgentService_ReportCommandResult_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -1,0 +1,12 @@
+id: lnx-suspicious-port
+title: Outbound connection to a common C2 port
+description: Outbound connection to ports used by default by Metasploit, reverse shells and IRC bots.
+level: medium
+tags: [attack.command_and_control, attack.t1571]
+logsource: {product: linux, category: network_connection}
+detection:
+  selection:
+    remote_port: [4444, 4445, 1337, 31337, 6666, 6667, 6697]
+  filter_private:
+    remote_addr|cidr: [127.0.0.0/8, '::1']
+  condition: selection and not filter_private

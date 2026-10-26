@@ -25,6 +25,7 @@ import (
 	xdrv1 "github.com/Bogan1011/xdr-agent/gen/xdr/v1"
 	"github.com/Bogan1011/xdr-agent/internal/server/api"
 	"github.com/Bogan1011/xdr-agent/internal/server/deploy"
+	"github.com/Bogan1011/xdr-agent/internal/server/detect"
 	"github.com/Bogan1011/xdr-agent/internal/server/grpcsvc"
 	"github.com/Bogan1011/xdr-agent/internal/server/pki"
 	"github.com/Bogan1011/xdr-agent/internal/server/store"
@@ -109,6 +110,12 @@ func run(log *slog.Logger) error {
 		log.Warn("mark stale deploy jobs", "err", err)
 	}
 
+	det := &detect.Service{DB: db, Log: log}
+	if err := det.Init(ctx); err != nil {
+		return fmt.Errorf("detection: %w", err)
+	}
+	go det.RunFeeds(ctx)
+
 	// Enrollment: server-authenticated TLS only, the token is the credential.
 	enrollTLS := &tls.Config{Certificates: []tls.Certificate{serverCert}, MinVersion: tls.VersionTLS13}
 	enrollSrv := grpc.NewServer(grpc.Creds(credentials.NewTLS(enrollTLS)))
@@ -121,7 +128,7 @@ func run(log *slog.Logger) error {
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		MinVersion:   tls.VersionTLS13,
 	}
-	agents := &grpcsvc.Agents{DB: db, Events: events, Log: log}
+	agents := &grpcsvc.Agents{DB: db, Events: events, Detect: det, Log: log}
 	agentSrv := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(agentTLS)),
 		grpc.UnaryInterceptor(agents.AuthInterceptor),
@@ -140,7 +147,7 @@ func run(log *slog.Logger) error {
 			AgentPort:     agentPort,
 			WebDir:        env("XDR_WEB_DIR", ""),
 			DownloadsDir:  env("XDR_DOWNLOADS_DIR", ""),
-		}, db, events, ca, &deploy.Deployer{DB: db, Log: log}, log).Handler(),
+		}, db, events, ca, &deploy.Deployer{DB: db, Log: log}, det, log).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

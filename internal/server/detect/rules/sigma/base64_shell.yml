@@ -1,0 +1,10 @@
+id: lnx-base64-decode-exec
+title: Base64 decoded payload executed
+description: A base64 blob is decoded and piped into a shell or interpreter.
+level: high
+tags: [attack.defense_evasion, attack.t1027, attack.t1140]
+logsource: {product: linux, category: process_creation}
+detection:
+  selection:
+    cmdline|re: 'base64\s+(-d|--decode)[^|]*\|\s*(sudo\s+)?(ba|da|z)?sh\b|base64\s+(-d|--decode)[^|]*\|\s*(python|perl)'
+  condition: selection

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Bogan1011/xdr-agent/internal/server/deploy"
+	"github.com/Bogan1011/xdr-agent/internal/server/detect"
 	"github.com/Bogan1011/xdr-agent/internal/server/pki"
 	"github.com/Bogan1011/xdr-agent/internal/server/store"
 )
@@ -45,14 +46,15 @@ type API struct {
 	events *store.ClickHouse
 	ca     *pki.CA
 	deploy *deploy.Deployer
+	detect *detect.Service
 	log    *slog.Logger
 
 	mu       sync.Mutex
 	sessions map[string]time.Time
 }
 
-func New(cfg Config, db *store.Postgres, events *store.ClickHouse, ca *pki.CA, dep *deploy.Deployer, log *slog.Logger) *API {
-	return &API{cfg: cfg, db: db, events: events, ca: ca, deploy: dep, log: log, sessions: map[string]time.Time{}}
+func New(cfg Config, db *store.Postgres, events *store.ClickHouse, ca *pki.CA, dep *deploy.Deployer, det *detect.Service, log *slog.Logger) *API {
+	return &API{cfg: cfg, db: db, events: events, ca: ca, deploy: dep, detect: det, log: log, sessions: map[string]time.Time{}}
 }
 
 func (a *API) Handler() http.Handler {
@@ -77,6 +79,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/enrollment-tokens", a.auth(a.createToken))
 	mux.HandleFunc("DELETE /api/v1/enrollment-tokens/{id}", a.auth(a.revokeToken))
 	mux.HandleFunc("GET /api/v1/install-info", a.auth(a.installInfo))
+	a.detectionRoutes(mux)
 
 	// Public: the installer fetches these before the host has any identity.
 	mux.HandleFunc("GET /pki/ca.crt", a.caCert)

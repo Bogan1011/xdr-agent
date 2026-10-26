@@ -27,6 +27,8 @@ type Config struct {
 	QueueSize       int           `yaml:"queue_size"`
 	BatchSize       int           `yaml:"batch_size"`
 	LogLevel        string        `yaml:"log_level"`
+	// ScanMaxBytes is the largest file the YARA scanner reads.
+	ScanMaxBytes int64 `yaml:"scan_max_bytes"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -46,6 +48,7 @@ func LoadConfig(path string) (*Config, error) {
 		QueueSize:       20000,
 		BatchSize:       1000,
 		LogLevel:        "info",
+		ScanMaxBytes:    32 << 20,
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {

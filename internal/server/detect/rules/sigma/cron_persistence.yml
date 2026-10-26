@@ -1,0 +1,12 @@
+id: lnx-cron-modified
+title: Cron job created or modified
+description: A crontab or cron directory file was written, a common persistence mechanism.
+level: medium
+tags: [attack.persistence, attack.t1053.003]
+logsource: {product: linux, category: file_event}
+detection:
+  selection:
+    path|startswith: [/etc/cron, /var/spool/cron/]
+  selection_file:
+    path: /etc/crontab
+  condition: 1 of selection*

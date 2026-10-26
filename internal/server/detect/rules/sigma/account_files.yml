@@ -1,0 +1,12 @@
+id: lnx-account-files-modified
+title: Account or sudo configuration modified
+description: /etc/passwd, /etc/shadow, /etc/group or sudoers changed.
+level: high
+tags: [attack.persistence, attack.privilege_escalation, attack.t1136.001, attack.t1548.003]
+logsource: {product: linux, category: file_event}
+detection:
+  selection:
+    path: [/etc/passwd, /etc/shadow, /etc/group, /etc/gshadow, /etc/sudoers]
+  sudoers_d:
+    path|startswith: /etc/sudoers.d/
+  condition: selection or sudoers_d

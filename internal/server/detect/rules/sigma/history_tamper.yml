@@ -1,0 +1,12 @@
+id: lnx-history-tampering
+title: Shell history cleared or disabled
+description: Commands that clear or disable shell history to hide activity.
+level: medium
+tags: [attack.defense_evasion, attack.t1070.003]
+logsource: {product: linux, category: process_creation}
+detection:
+  selection:
+    cmdline|contains: ['history -c', 'unset HISTFILE', 'HISTFILESIZE=0', 'HISTSIZE=0', '.bash_history']
+  filter:
+    exe|endswith: [/less, /cat, /vim, /vi, /nano, /grep]
+  condition: selection and not filter

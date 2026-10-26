@@ -1,0 +1,12 @@
+id: lnx-kernel-module-load
+title: Kernel module loaded
+description: insmod or modprobe loaded a kernel module, which rootkits use to hide.
+level: medium
+tags: [attack.persistence, attack.t1547.006]
+logsource: {product: linux, category: process_creation}
+detection:
+  selection:
+    exe|endswith: [/insmod, /modprobe]
+  filter:
+    cmdline|contains: [' -r ', '--remove']
+  condition: selection and not filter
