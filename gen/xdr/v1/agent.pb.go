@@ -21,6 +21,53 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type CommandType int32
+
+const (
+	CommandType_COMMAND_TYPE_UNSPECIFIED CommandType = 0
+	// Remove the agent, its config and its identity from the host.
+	CommandType_COMMAND_TYPE_UNINSTALL CommandType = 1
+)
+
+// Enum value maps for CommandType.
+var (
+	CommandType_name = map[int32]string{
+		0: "COMMAND_TYPE_UNSPECIFIED",
+		1: "COMMAND_TYPE_UNINSTALL",
+	}
+	CommandType_value = map[string]int32{
+		"COMMAND_TYPE_UNSPECIFIED": 0,
+		"COMMAND_TYPE_UNINSTALL":   1,
+	}
+)
+
+func (x CommandType) Enum() *CommandType {
+	p := new(CommandType)
+	*p = x
+	return p
+}
+
+func (x CommandType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CommandType) Descriptor() protoreflect.EnumDescriptor {
+	return file_xdr_v1_agent_proto_enumTypes[0].Descriptor()
+}
+
+func (CommandType) Type() protoreflect.EnumType {
+	return &file_xdr_v1_agent_proto_enumTypes[0]
+}
+
+func (x CommandType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CommandType.Descriptor instead.
+func (CommandType) EnumDescriptor() ([]byte, []int) {
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{0}
+}
+
 type EventType int32
 
 const (
@@ -75,11 +122,11 @@ func (x EventType) String() string {
 }
 
 func (EventType) Descriptor() protoreflect.EnumDescriptor {
-	return file_xdr_v1_agent_proto_enumTypes[0].Descriptor()
+	return file_xdr_v1_agent_proto_enumTypes[1].Descriptor()
 }
 
 func (EventType) Type() protoreflect.EnumType {
-	return &file_xdr_v1_agent_proto_enumTypes[0]
+	return &file_xdr_v1_agent_proto_enumTypes[1]
 }
 
 func (x EventType) Number() protoreflect.EnumNumber {
@@ -88,7 +135,7 @@ func (x EventType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use EventType.Descriptor instead.
 func (EventType) EnumDescriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{0}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{1}
 }
 
 type HostInfo struct {
@@ -442,8 +489,10 @@ func (x *AgentStats) GetRssBytes() uint64 {
 type HeartbeatResponse struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ServerTimeUnix int64                  `protobuf:"varint,1,opt,name=server_time_unix,json=serverTimeUnix,proto3" json:"server_time_unix,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Commands for the agent to run, delivered once.
+	Commands      []*AgentCommand `protobuf:"bytes,2,rep,name=commands,proto3" json:"commands,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *HeartbeatResponse) Reset() {
@@ -483,6 +532,65 @@ func (x *HeartbeatResponse) GetServerTimeUnix() int64 {
 	return 0
 }
 
+func (x *HeartbeatResponse) GetCommands() []*AgentCommand {
+	if x != nil {
+		return x.Commands
+	}
+	return nil
+}
+
+type AgentCommand struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Type          CommandType            `protobuf:"varint,2,opt,name=type,proto3,enum=xdr.v1.CommandType" json:"type,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentCommand) Reset() {
+	*x = AgentCommand{}
+	mi := &file_xdr_v1_agent_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentCommand) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentCommand) ProtoMessage() {}
+
+func (x *AgentCommand) ProtoReflect() protoreflect.Message {
+	mi := &file_xdr_v1_agent_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentCommand.ProtoReflect.Descriptor instead.
+func (*AgentCommand) Descriptor() ([]byte, []int) {
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *AgentCommand) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *AgentCommand) GetType() CommandType {
+	if x != nil {
+		return x.Type
+	}
+	return CommandType_COMMAND_TYPE_UNSPECIFIED
+}
+
 type EventBatch struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Events        []*Event               `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
@@ -492,7 +600,7 @@ type EventBatch struct {
 
 func (x *EventBatch) Reset() {
 	*x = EventBatch{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[6]
+	mi := &file_xdr_v1_agent_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -504,7 +612,7 @@ func (x *EventBatch) String() string {
 func (*EventBatch) ProtoMessage() {}
 
 func (x *EventBatch) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[6]
+	mi := &file_xdr_v1_agent_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -517,7 +625,7 @@ func (x *EventBatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventBatch.ProtoReflect.Descriptor instead.
 func (*EventBatch) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{6}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *EventBatch) GetEvents() []*Event {
@@ -536,7 +644,7 @@ type SendEventsResponse struct {
 
 func (x *SendEventsResponse) Reset() {
 	*x = SendEventsResponse{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[7]
+	mi := &file_xdr_v1_agent_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -548,7 +656,7 @@ func (x *SendEventsResponse) String() string {
 func (*SendEventsResponse) ProtoMessage() {}
 
 func (x *SendEventsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[7]
+	mi := &file_xdr_v1_agent_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -561,7 +669,7 @@ func (x *SendEventsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendEventsResponse.ProtoReflect.Descriptor instead.
 func (*SendEventsResponse) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{7}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SendEventsResponse) GetAccepted() uint64 {
@@ -588,7 +696,7 @@ type Event struct {
 
 func (x *Event) Reset() {
 	*x = Event{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[8]
+	mi := &file_xdr_v1_agent_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -600,7 +708,7 @@ func (x *Event) String() string {
 func (*Event) ProtoMessage() {}
 
 func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[8]
+	mi := &file_xdr_v1_agent_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -613,7 +721,7 @@ func (x *Event) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Event.ProtoReflect.Descriptor instead.
 func (*Event) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{8}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Event) GetId() string {
@@ -712,7 +820,7 @@ type ProcessEvent struct {
 
 func (x *ProcessEvent) Reset() {
 	*x = ProcessEvent{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[9]
+	mi := &file_xdr_v1_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -724,7 +832,7 @@ func (x *ProcessEvent) String() string {
 func (*ProcessEvent) ProtoMessage() {}
 
 func (x *ProcessEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[9]
+	mi := &file_xdr_v1_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -737,7 +845,7 @@ func (x *ProcessEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessEvent.ProtoReflect.Descriptor instead.
 func (*ProcessEvent) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{9}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ProcessEvent) GetPid() uint32 {
@@ -831,7 +939,7 @@ type FileEvent struct {
 
 func (x *FileEvent) Reset() {
 	*x = FileEvent{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[10]
+	mi := &file_xdr_v1_agent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -843,7 +951,7 @@ func (x *FileEvent) String() string {
 func (*FileEvent) ProtoMessage() {}
 
 func (x *FileEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[10]
+	mi := &file_xdr_v1_agent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -856,7 +964,7 @@ func (x *FileEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileEvent.ProtoReflect.Descriptor instead.
 func (*FileEvent) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{10}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *FileEvent) GetPath() string {
@@ -917,7 +1025,7 @@ type NetworkEvent struct {
 
 func (x *NetworkEvent) Reset() {
 	*x = NetworkEvent{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[11]
+	mi := &file_xdr_v1_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -929,7 +1037,7 @@ func (x *NetworkEvent) String() string {
 func (*NetworkEvent) ProtoMessage() {}
 
 func (x *NetworkEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[11]
+	mi := &file_xdr_v1_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -942,7 +1050,7 @@ func (x *NetworkEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkEvent.ProtoReflect.Descriptor instead.
 func (*NetworkEvent) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{11}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *NetworkEvent) GetProtocol() string {
@@ -1036,9 +1144,13 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"\x0euptime_seconds\x18\x03 \x01(\x04R\ruptimeSeconds\x12\x1f\n" +
 	"\vcpu_percent\x18\x04 \x01(\x01R\n" +
 	"cpuPercent\x12\x1b\n" +
-	"\trss_bytes\x18\x05 \x01(\x04R\brssBytes\"=\n" +
+	"\trss_bytes\x18\x05 \x01(\x04R\brssBytes\"o\n" +
 	"\x11HeartbeatResponse\x12(\n" +
-	"\x10server_time_unix\x18\x01 \x01(\x03R\x0eserverTimeUnix\"3\n" +
+	"\x10server_time_unix\x18\x01 \x01(\x03R\x0eserverTimeUnix\x120\n" +
+	"\bcommands\x18\x02 \x03(\v2\x14.xdr.v1.AgentCommandR\bcommands\"G\n" +
+	"\fAgentCommand\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12'\n" +
+	"\x04type\x18\x02 \x01(\x0e2\x13.xdr.v1.CommandTypeR\x04type\"3\n" +
 	"\n" +
 	"EventBatch\x12%\n" +
 	"\x06events\x18\x01 \x03(\v2\r.xdr.v1.EventR\x06events\"0\n" +
@@ -1086,7 +1198,10 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"remotePort\x12\x10\n" +
 	"\x03pid\x18\x06 \x01(\rR\x03pid\x12\x10\n" +
 	"\x03exe\x18\a \x01(\tR\x03exe\x12\x10\n" +
-	"\x03uid\x18\b \x01(\rR\x03uid*\xa4\x02\n" +
+	"\x03uid\x18\b \x01(\rR\x03uid*G\n" +
+	"\vCommandType\x12\x1c\n" +
+	"\x18COMMAND_TYPE_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16COMMAND_TYPE_UNINSTALL\x10\x01*\xa4\x02\n" +
 	"\tEventType\x12\x1a\n" +
 	"\x16EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17EVENT_TYPE_PROCESS_EXEC\x10\x01\x12\x1b\n" +
@@ -1117,43 +1232,47 @@ func file_xdr_v1_agent_proto_rawDescGZIP() []byte {
 	return file_xdr_v1_agent_proto_rawDescData
 }
 
-var file_xdr_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_xdr_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_xdr_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_xdr_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_xdr_v1_agent_proto_goTypes = []any{
-	(EventType)(0),             // 0: xdr.v1.EventType
-	(*HostInfo)(nil),           // 1: xdr.v1.HostInfo
-	(*EnrollRequest)(nil),      // 2: xdr.v1.EnrollRequest
-	(*EnrollResponse)(nil),     // 3: xdr.v1.EnrollResponse
-	(*HeartbeatRequest)(nil),   // 4: xdr.v1.HeartbeatRequest
-	(*AgentStats)(nil),         // 5: xdr.v1.AgentStats
-	(*HeartbeatResponse)(nil),  // 6: xdr.v1.HeartbeatResponse
-	(*EventBatch)(nil),         // 7: xdr.v1.EventBatch
-	(*SendEventsResponse)(nil), // 8: xdr.v1.SendEventsResponse
-	(*Event)(nil),              // 9: xdr.v1.Event
-	(*ProcessEvent)(nil),       // 10: xdr.v1.ProcessEvent
-	(*FileEvent)(nil),          // 11: xdr.v1.FileEvent
-	(*NetworkEvent)(nil),       // 12: xdr.v1.NetworkEvent
+	(CommandType)(0),           // 0: xdr.v1.CommandType
+	(EventType)(0),             // 1: xdr.v1.EventType
+	(*HostInfo)(nil),           // 2: xdr.v1.HostInfo
+	(*EnrollRequest)(nil),      // 3: xdr.v1.EnrollRequest
+	(*EnrollResponse)(nil),     // 4: xdr.v1.EnrollResponse
+	(*HeartbeatRequest)(nil),   // 5: xdr.v1.HeartbeatRequest
+	(*AgentStats)(nil),         // 6: xdr.v1.AgentStats
+	(*HeartbeatResponse)(nil),  // 7: xdr.v1.HeartbeatResponse
+	(*AgentCommand)(nil),       // 8: xdr.v1.AgentCommand
+	(*EventBatch)(nil),         // 9: xdr.v1.EventBatch
+	(*SendEventsResponse)(nil), // 10: xdr.v1.SendEventsResponse
+	(*Event)(nil),              // 11: xdr.v1.Event
+	(*ProcessEvent)(nil),       // 12: xdr.v1.ProcessEvent
+	(*FileEvent)(nil),          // 13: xdr.v1.FileEvent
+	(*NetworkEvent)(nil),       // 14: xdr.v1.NetworkEvent
 }
 var file_xdr_v1_agent_proto_depIdxs = []int32{
-	1,  // 0: xdr.v1.EnrollRequest.host:type_name -> xdr.v1.HostInfo
-	1,  // 1: xdr.v1.HeartbeatRequest.host:type_name -> xdr.v1.HostInfo
-	5,  // 2: xdr.v1.HeartbeatRequest.stats:type_name -> xdr.v1.AgentStats
-	9,  // 3: xdr.v1.EventBatch.events:type_name -> xdr.v1.Event
-	0,  // 4: xdr.v1.Event.type:type_name -> xdr.v1.EventType
-	10, // 5: xdr.v1.Event.process:type_name -> xdr.v1.ProcessEvent
-	11, // 6: xdr.v1.Event.file:type_name -> xdr.v1.FileEvent
-	12, // 7: xdr.v1.Event.network:type_name -> xdr.v1.NetworkEvent
-	2,  // 8: xdr.v1.EnrollmentService.Enroll:input_type -> xdr.v1.EnrollRequest
-	4,  // 9: xdr.v1.AgentService.Heartbeat:input_type -> xdr.v1.HeartbeatRequest
-	7,  // 10: xdr.v1.AgentService.SendEvents:input_type -> xdr.v1.EventBatch
-	3,  // 11: xdr.v1.EnrollmentService.Enroll:output_type -> xdr.v1.EnrollResponse
-	6,  // 12: xdr.v1.AgentService.Heartbeat:output_type -> xdr.v1.HeartbeatResponse
-	8,  // 13: xdr.v1.AgentService.SendEvents:output_type -> xdr.v1.SendEventsResponse
-	11, // [11:14] is the sub-list for method output_type
-	8,  // [8:11] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	2,  // 0: xdr.v1.EnrollRequest.host:type_name -> xdr.v1.HostInfo
+	2,  // 1: xdr.v1.HeartbeatRequest.host:type_name -> xdr.v1.HostInfo
+	6,  // 2: xdr.v1.HeartbeatRequest.stats:type_name -> xdr.v1.AgentStats
+	8,  // 3: xdr.v1.HeartbeatResponse.commands:type_name -> xdr.v1.AgentCommand
+	0,  // 4: xdr.v1.AgentCommand.type:type_name -> xdr.v1.CommandType
+	11, // 5: xdr.v1.EventBatch.events:type_name -> xdr.v1.Event
+	1,  // 6: xdr.v1.Event.type:type_name -> xdr.v1.EventType
+	12, // 7: xdr.v1.Event.process:type_name -> xdr.v1.ProcessEvent
+	13, // 8: xdr.v1.Event.file:type_name -> xdr.v1.FileEvent
+	14, // 9: xdr.v1.Event.network:type_name -> xdr.v1.NetworkEvent
+	3,  // 10: xdr.v1.EnrollmentService.Enroll:input_type -> xdr.v1.EnrollRequest
+	5,  // 11: xdr.v1.AgentService.Heartbeat:input_type -> xdr.v1.HeartbeatRequest
+	9,  // 12: xdr.v1.AgentService.SendEvents:input_type -> xdr.v1.EventBatch
+	4,  // 13: xdr.v1.EnrollmentService.Enroll:output_type -> xdr.v1.EnrollResponse
+	7,  // 14: xdr.v1.AgentService.Heartbeat:output_type -> xdr.v1.HeartbeatResponse
+	10, // 15: xdr.v1.AgentService.SendEvents:output_type -> xdr.v1.SendEventsResponse
+	13, // [13:16] is the sub-list for method output_type
+	10, // [10:13] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_xdr_v1_agent_proto_init() }
@@ -1161,7 +1280,7 @@ func file_xdr_v1_agent_proto_init() {
 	if File_xdr_v1_agent_proto != nil {
 		return
 	}
-	file_xdr_v1_agent_proto_msgTypes[8].OneofWrappers = []any{
+	file_xdr_v1_agent_proto_msgTypes[9].OneofWrappers = []any{
 		(*Event_Process)(nil),
 		(*Event_File)(nil),
 		(*Event_Network)(nil),
@@ -1171,8 +1290,8 @@ func file_xdr_v1_agent_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_xdr_v1_agent_proto_rawDesc), len(file_xdr_v1_agent_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   12,
+			NumEnums:      2,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

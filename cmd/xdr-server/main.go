@@ -24,6 +24,7 @@ import (
 
 	xdrv1 "github.com/Bogan1011/xdr-agent/gen/xdr/v1"
 	"github.com/Bogan1011/xdr-agent/internal/server/api"
+	"github.com/Bogan1011/xdr-agent/internal/server/deploy"
 	"github.com/Bogan1011/xdr-agent/internal/server/grpcsvc"
 	"github.com/Bogan1011/xdr-agent/internal/server/pki"
 	"github.com/Bogan1011/xdr-agent/internal/server/store"
@@ -104,6 +105,10 @@ func run(log *slog.Logger) error {
 	}
 	defer events.Close()
 
+	if err := db.FailStaleDeployJobs(ctx); err != nil {
+		log.Warn("mark stale deploy jobs", "err", err)
+	}
+
 	// Enrollment: server-authenticated TLS only, the token is the credential.
 	enrollTLS := &tls.Config{Certificates: []tls.Certificate{serverCert}, MinVersion: tls.VersionTLS13}
 	enrollSrv := grpc.NewServer(grpc.Creds(credentials.NewTLS(enrollTLS)))
@@ -135,7 +140,7 @@ func run(log *slog.Logger) error {
 			AgentPort:     agentPort,
 			WebDir:        env("XDR_WEB_DIR", ""),
 			DownloadsDir:  env("XDR_DOWNLOADS_DIR", ""),
-		}, db, events, ca, log).Handler(),
+		}, db, events, ca, &deploy.Deployer{DB: db, Log: log}, log).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

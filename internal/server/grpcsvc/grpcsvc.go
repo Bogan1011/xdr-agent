@@ -105,7 +105,16 @@ func (s *Agents) Heartbeat(ctx context.Context, req *xdrv1.HeartbeatRequest) (*x
 			return nil, status.Error(codes.Unavailable, "store unavailable")
 		}
 	}
-	return &xdrv1.HeartbeatResponse{ServerTimeUnix: time.Now().Unix()}, nil
+	resp := &xdrv1.HeartbeatResponse{ServerTimeUnix: time.Now().Unix()}
+	cmd, err := s.DB.TakeCommand(ctx, a.id)
+	if err != nil {
+		s.Log.Error("take command", "agent_id", a.id, "err", err)
+	}
+	if cmd == "uninstall" {
+		s.Log.Info("sending uninstall to agent", "agent_id", a.id, "hostname", a.hostname)
+		resp.Commands = append(resp.Commands, &xdrv1.AgentCommand{Id: newAgentID(), Type: xdrv1.CommandType_COMMAND_TYPE_UNINSTALL})
+	}
+	return resp, nil
 }
 
 func (s *Agents) SendEvents(ctx context.Context, req *xdrv1.EventBatch) (*xdrv1.SendEventsResponse, error) {

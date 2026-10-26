@@ -2,11 +2,17 @@ import { Link } from "react-router-dom";
 import { api, timeAgo } from "../api";
 import { usePoll } from "../hooks";
 
-export function StatusBadge({ online, revoked }: { online: boolean; revoked: boolean }) {
+export function StatusBadge({ online, revoked, uninstalled, uninstalling }: {
+  online: boolean; revoked: boolean; uninstalled?: boolean; uninstalling?: boolean;
+}) {
+  if (uninstalled) return <span className="status status-critical"><span aria-hidden>■</span> Uninstalled</span>;
+  if (uninstalling) return <span className="status status-warn"><span aria-hidden>▲</span> Uninstalling…</span>;
   if (revoked) return <span className="status status-critical"><span aria-hidden>■</span> Revoked</span>;
   if (online) return <span className="status status-good"><span aria-hidden>●</span> Online</span>;
   return <span className="status status-warn"><span aria-hidden>▲</span> Offline</span>;
 }
+
+export const isSet = (iso: string) => new Date(iso).getTime() > 1000;
 
 export default function Endpoints() {
   const { data, error } = usePoll(api.agents, 10000);
@@ -43,7 +49,7 @@ export default function Endpoints() {
                       <Link to={`/endpoints/${a.id}`}>{a.hostname}</Link>
                     </td>
                     <td>
-                      <StatusBadge online={a.online} revoked={a.revoked} />
+                      <StatusBadge online={a.online} revoked={a.revoked} uninstalled={isSet(a.uninstalled_at)} uninstalling={a.pending_command === "uninstall"} />
                     </td>
                     <td>{a.os_version || a.os}</td>
                     <td className="mono">{a.ip_addresses.join(", ")}</td>

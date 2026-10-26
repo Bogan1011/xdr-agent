@@ -73,6 +73,19 @@ CREATE TABLE IF NOT EXISTS enrollment_tokens (
 	uses        INT NOT NULL DEFAULT 0,
 	revoked     BOOLEAN NOT NULL DEFAULT false
 );
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS pending_command TEXT NOT NULL DEFAULT '';
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS uninstalled_at TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS deploy_jobs (
+	id          BIGSERIAL PRIMARY KEY,
+	host        TEXT NOT NULL,
+	port        INT NOT NULL,
+	username    TEXT NOT NULL,
+	status      TEXT NOT NULL DEFAULT 'pending',
+	host_key    TEXT NOT NULL DEFAULT '',
+	log         TEXT NOT NULL DEFAULT '',
+	created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+	finished_at TIMESTAMPTZ
+);
 `)
 	return err
 }
@@ -95,18 +108,21 @@ type Agent struct {
 	CPUPercent    float64   `json:"cpu_percent"`
 	RSSBytes      int64     `json:"rss_bytes"`
 	Revoked       bool      `json:"revoked"`
-	Online        bool      `json:"online"`
+	// PendingCommand is "uninstall" while an uninstall waits for the agent's next check-in.
+	PendingCommand string    `json:"pending_command"`
+	UninstalledAt  time.Time `json:"uninstalled_at"`
+	Online         bool      `json:"online"`
 }
 
 const agentCols = `id, hostname, os, os_version, kernel, arch, ip_addresses, agent_version, machine_id,
 	COALESCE(cert_expires, 'epoch'), enrolled_at, COALESCE(last_seen, 'epoch'), events_sent, events_dropped,
-	cpu_percent, rss_bytes, revoked`
+	cpu_percent, rss_bytes, revoked, pending_command, COALESCE(uninstalled_at, 'epoch')`
 
 func scanAgent(row pgx.Row) (*Agent, error) {
 	a := &Agent{}
 	err := row.Scan(&a.ID, &a.Hostname, &a.OS, &a.OSVersion, &a.Kernel, &a.Arch, &a.IPAddresses, &a.AgentVersion,
 		&a.MachineID, &a.CertExpires, &a.EnrolledAt, &a.LastSeen, &a.EventsSent, &a.EventsDropped,
-		&a.CPUPercent, &a.RSSBytes, &a.Revoked)
+		&a.CPUPercent, &a.RSSBytes, &a.Revoked, &a.PendingCommand, &a.UninstalledAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -170,6 +186,31 @@ func (p *Postgres) Heartbeat(ctx context.Context, id string, h HostUpdate, sent,
 		id, h.Hostname, h.OS, h.OSVersion, h.Kernel, h.Arch, nonNil(h.IPAddresses), h.AgentVersion, h.MachineID,
 		int64(sent), int64(dropped), cpu, int64(rss))
 	return err
+}
+
+// RequestUninstall queues an uninstall for the agent's next heartbeat.
+func (p *Postgres) RequestUninstall(ctx context.Context, id string) error {
+	tag, err := p.pool.Exec(ctx, `UPDATE agents SET pending_command = 'uninstall' WHERE id = $1 AND NOT revoked`, id)
+	if err == nil && tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return err
+}
+
+// TakeCommand returns and clears the agent's pending command. Delivering an
+// uninstall also revokes the agent, so its certificate stops working.
+func (p *Postgres) TakeCommand(ctx context.Context, id string) (string, error) {
+	var cmd string
+	err := p.pool.QueryRow(ctx, `UPDATE agents a SET pending_command = '',
+		revoked = a.revoked OR a.pending_command = 'uninstall',
+		uninstalled_at = CASE WHEN a.pending_command = 'uninstall' THEN now() ELSE a.uninstalled_at END
+		FROM (SELECT id, pending_command FROM agents WHERE id = $1 FOR UPDATE) old
+		WHERE a.id = old.id AND old.pending_command != ''
+		RETURNING old.pending_command`, id).Scan(&cmd)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return cmd, err
 }
 
 func (p *Postgres) Touch(ctx context.Context, id string) error {
@@ -267,4 +308,55 @@ func nonNil(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+type DeployJob struct {
+	ID         int64     `json:"id"`
+	Host       string    `json:"host"`
+	Port       int       `json:"port"`
+	Username   string    `json:"username"`
+	Status     string    `json:"status"`
+	HostKey    string    `json:"host_key"`
+	Log        string    `json:"log"`
+	CreatedAt  time.Time `json:"created_at"`
+	FinishedAt time.Time `json:"finished_at"`
+}
+
+func (p *Postgres) CreateDeployJob(ctx context.Context, host string, port int, user string) (int64, error) {
+	var id int64
+	err := p.pool.QueryRow(ctx, `INSERT INTO deploy_jobs (host, port, username) VALUES ($1, $2, $3) RETURNING id`,
+		host, port, user).Scan(&id)
+	return id, err
+}
+
+// UpdateDeployJob records progress; finished marks the job as done.
+func (p *Postgres) UpdateDeployJob(ctx context.Context, id int64, status, hostKey, log string, finished bool) error {
+	_, err := p.pool.Exec(ctx, `UPDATE deploy_jobs SET status = $2, host_key = $3, log = $4,
+		finished_at = CASE WHEN $5 THEN now() ELSE finished_at END WHERE id = $1`, id, status, hostKey, log, finished)
+	return err
+}
+
+func (p *Postgres) ListDeployJobs(ctx context.Context, limit int) ([]*DeployJob, error) {
+	rows, err := p.pool.Query(ctx, `SELECT id, host, port, username, status, host_key, log, created_at,
+		COALESCE(finished_at, 'epoch') FROM deploy_jobs ORDER BY id DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*DeployJob{}
+	for rows.Next() {
+		j := &DeployJob{}
+		if err := rows.Scan(&j.ID, &j.Host, &j.Port, &j.Username, &j.Status, &j.HostKey, &j.Log, &j.CreatedAt, &j.FinishedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
+// FailStaleDeployJobs marks jobs left running by a server restart as failed.
+func (p *Postgres) FailStaleDeployJobs(ctx context.Context) error {
+	_, err := p.pool.Exec(ctx, `UPDATE deploy_jobs SET status = 'failed', log = log || E'\nserver restarted during the job',
+		finished_at = now() WHERE status IN ('pending', 'running')`)
+	return err
 }

@@ -17,6 +17,29 @@ export interface Agent {
   rss_bytes: number;
   revoked: boolean;
   online: boolean;
+  pending_command: string;
+  uninstalled_at: string;
+}
+
+export interface DeployJob {
+  id: number;
+  host: string;
+  port: number;
+  username: string;
+  status: "pending" | "running" | "succeeded" | "failed";
+  host_key: string;
+  log: string;
+  created_at: string;
+  finished_at: string;
+}
+
+export interface RemoteInstall {
+  hosts: string;
+  port: number;
+  username: string;
+  password: string;
+  private_key: string;
+  passphrase: string;
 }
 
 export interface XdrEvent {
@@ -118,6 +141,9 @@ export const api = {
   agents: () => request<Agent[]>("GET", "/api/v1/agents"),
   agent: (id: string) => request<Agent>("GET", `/api/v1/agents/${encodeURIComponent(id)}`),
   revokeAgent: (id: string) => request<void>("POST", `/api/v1/agents/${encodeURIComponent(id)}/revoke`, {}),
+  uninstallAgent: (id: string) => request<void>("POST", `/api/v1/agents/${encodeURIComponent(id)}/uninstall`, {}),
+  deployJobs: () => request<DeployJob[]>("GET", "/api/v1/deploy-jobs"),
+  remoteInstall: (r: RemoteInstall) => request<{ job_ids: number[] }>("POST", "/api/v1/deploy-jobs", r),
   deleteAgent: (id: string) => request<void>("DELETE", `/api/v1/agents/${encodeURIComponent(id)}`),
   events: (f: EventFilter) => {
     const p = new URLSearchParams();

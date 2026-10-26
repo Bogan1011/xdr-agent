@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Bogan1011/xdr-agent/internal/server/deploy"
 	"github.com/Bogan1011/xdr-agent/internal/server/pki"
 	"github.com/Bogan1011/xdr-agent/internal/server/store"
 )
@@ -43,14 +44,15 @@ type API struct {
 	db     *store.Postgres
 	events *store.ClickHouse
 	ca     *pki.CA
+	deploy *deploy.Deployer
 	log    *slog.Logger
 
 	mu       sync.Mutex
 	sessions map[string]time.Time
 }
 
-func New(cfg Config, db *store.Postgres, events *store.ClickHouse, ca *pki.CA, log *slog.Logger) *API {
-	return &API{cfg: cfg, db: db, events: events, ca: ca, log: log, sessions: map[string]time.Time{}}
+func New(cfg Config, db *store.Postgres, events *store.ClickHouse, ca *pki.CA, dep *deploy.Deployer, log *slog.Logger) *API {
+	return &API{cfg: cfg, db: db, events: events, ca: ca, deploy: dep, log: log, sessions: map[string]time.Time{}}
 }
 
 func (a *API) Handler() http.Handler {
@@ -64,6 +66,9 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/agents/{id}", a.auth(a.getAgent))
 	mux.HandleFunc("POST /api/v1/agents/{id}/revoke", a.auth(a.revokeAgent))
 	mux.HandleFunc("DELETE /api/v1/agents/{id}", a.auth(a.deleteAgent))
+	mux.HandleFunc("POST /api/v1/agents/{id}/uninstall", a.auth(a.uninstallAgent))
+	mux.HandleFunc("GET /api/v1/deploy-jobs", a.auth(a.listDeployJobs))
+	mux.HandleFunc("POST /api/v1/deploy-jobs", a.auth(a.createDeployJobs))
 
 	mux.HandleFunc("GET /api/v1/events", a.auth(a.queryEvents))
 	mux.HandleFunc("GET /api/v1/stats", a.auth(a.stats))
@@ -218,6 +223,51 @@ func (a *API) deleteAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	a.log.Info("agent deleted", "agent_id", r.PathValue("id"))
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) uninstallAgent(w http.ResponseWriter, r *http.Request) {
+	if a.fail(w, a.db.RequestUninstall(r.Context(), r.PathValue("id"))) {
+		return
+	}
+	a.log.Info("agent uninstall requested", "agent_id", r.PathValue("id"))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- remote install ---
+
+func (a *API) listDeployJobs(w http.ResponseWriter, r *http.Request) {
+	jobs, err := a.db.ListDeployJobs(r.Context(), 50)
+	if a.fail(w, err) {
+		return
+	}
+	writeJSON(w, jobs)
+}
+
+func (a *API) createDeployJobs(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Hosts      string `json:"hosts"`
+		Port       int    `json:"port"`
+		Username   string `json:"username"`
+		Password   string `json:"password"`
+		PrivateKey string `json:"private_key"`
+		Passphrase string `json:"passphrase"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	hosts := strings.FieldsFunc(req.Hosts, func(c rune) bool { return c == ',' || c == '\n' || c == ' ' || c == '\r' || c == '\t' })
+	ids, err := a.deploy.Start(r.Context(), deploy.Request{
+		Hosts: hosts, Port: req.Port, Username: req.Username, Password: req.Password,
+		PrivateKey: req.PrivateKey, Passphrase: req.Passphrase,
+		BaseURL: baseURL(r), CASHA256: a.ca.Fingerprint(),
+	})
+	if err != nil && len(ids) == 0 {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.log.Info("remote install started", "hosts", hosts, "user", req.Username)
+	writeJSON(w, map[string]any{"job_ids": ids})
 }
 
 // --- events ---

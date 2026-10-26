@@ -219,3 +219,8 @@ table.events td:last-child { width: 60%; }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid-2 { grid-template-columns: 1fr; }
 }
+
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.stack > label { display: flex; flex-direction: column; gap: 6px; color: var(--text-2); }
+textarea { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; resize: vertical; }
+.section-title { margin: 24px 0 12px; }

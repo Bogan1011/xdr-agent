@@ -1,6 +1,7 @@
 import { FormEvent, useState } from "react";
 import { EnrollmentToken, api, timeAgo } from "../api";
 import { usePoll } from "../hooks";
+import RemoteInstall from "../components/RemoteInstall";
 
 export default function Deploy() {
   const info = usePoll(api.installInfo, 0);
@@ -41,6 +42,9 @@ export default function Deploy() {
         <h1>Deploy agents</h1>
       </header>
 
+      <RemoteInstall />
+
+      <h2 className="section-title">Manual install</h2>
       <section className="card">
         <h2>1. Create an enrollment token</h2>
         <p className="muted">
@@ -68,7 +72,7 @@ export default function Deploy() {
           <CopyButton text={cmd} />
           <p className="muted small">
             The installer checks that the CA certificate it downloads matches the fingerprint in this command before trusting the server.
-            Remote install from the console (over SSH) arrives in step 3.
+            
           </p>
         </section>
       )}

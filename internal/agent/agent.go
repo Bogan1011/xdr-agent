@@ -177,10 +177,13 @@ func (a *Agent) heartbeatLoop(ctx context.Context, client xdrv1.AgentServiceClie
 	defer t.Stop()
 	for {
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, err := client.Heartbeat(cctx, &xdrv1.HeartbeatRequest{Host: host, Stats: a.stats()})
+		resp, err := client.Heartbeat(cctx, &xdrv1.HeartbeatRequest{Host: host, Stats: a.stats()})
 		cancel()
 		if err != nil && ctx.Err() == nil {
 			a.log.Warn("heartbeat failed", "err", err)
+		}
+		for _, c := range resp.GetCommands() {
+			a.runCommand(c)
 		}
 		select {
 		case <-ctx.Done():

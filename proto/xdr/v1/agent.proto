@@ -57,6 +57,19 @@ message AgentStats {
 
 message HeartbeatResponse {
   int64 server_time_unix = 1;
+  // Commands for the agent to run, delivered once.
+  repeated AgentCommand commands = 2;
+}
+
+enum CommandType {
+  COMMAND_TYPE_UNSPECIFIED = 0;
+  // Remove the agent, its config and its identity from the host.
+  COMMAND_TYPE_UNINSTALL = 1;
+}
+
+message AgentCommand {
+  string id = 1;
+  CommandType type = 2;
 }
 
 message EventBatch {

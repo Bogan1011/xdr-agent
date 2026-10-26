@@ -4,7 +4,7 @@ import { api, formatBytes, timeAgo } from "../api";
 import { usePoll } from "../hooks";
 import EventTable from "../components/EventTable";
 import Timeline from "../components/Timeline";
-import { StatusBadge } from "./Endpoints";
+import { StatusBadge, isSet } from "./Endpoints";
 
 export default function EndpointDetail() {
   const { id = "" } = useParams();
@@ -23,6 +23,11 @@ export default function EndpointDetail() {
     await api.revokeAgent(id);
     agent.refresh();
   }
+  async function uninstall() {
+    if (!confirm(`Uninstall the agent from ${a!.hostname}? It removes itself at its next check-in (within 30 seconds).`)) return;
+    await api.uninstallAgent(id);
+    agent.refresh();
+  }
   async function remove() {
     if (!confirm(`Delete ${a!.hostname} from the console? Its events are kept until they expire.`)) return;
     await api.deleteAgent(id);
@@ -37,6 +42,7 @@ export default function EndpointDetail() {
           <h1>{a.hostname}</h1>
         </div>
         <div className="actions">
+          {!a.revoked && !a.pending_command && <button onClick={uninstall}>Uninstall</button>}
           {!a.revoked && <button onClick={revoke}>Revoke</button>}
           <button className="danger" onClick={remove}>Delete</button>
         </div>
@@ -44,7 +50,7 @@ export default function EndpointDetail() {
 
       <section className="card">
         <dl className="facts">
-          <div><dt>Status</dt><dd><StatusBadge online={a.online} revoked={a.revoked} /></dd></div>
+          <div><dt>Status</dt><dd><StatusBadge online={a.online} revoked={a.revoked} uninstalled={isSet(a.uninstalled_at)} uninstalling={a.pending_command === "uninstall"} /></dd></div>
           <div><dt>Last seen</dt><dd>{timeAgo(a.last_seen)}</dd></div>
           <div><dt>OS</dt><dd>{a.os_version}</dd></div>
           <div><dt>Kernel</dt><dd className="mono">{a.kernel} ({a.arch})</dd></div>
