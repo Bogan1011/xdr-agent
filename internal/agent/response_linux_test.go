@@ -11,7 +11,6 @@ import (
 	xdrv1 "github.com/Bogan1011/xdr-agent/gen/xdr/v1"
 )
 
-
 func TestQuarantineRestore(t *testing.T) {
 	dir := t.TempDir()
 	a := &Agent{cfg: &Config{StateDir: filepath.Join(dir, "state")}, log: slog.Default()}
