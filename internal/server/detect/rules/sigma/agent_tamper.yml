@@ -6,5 +6,5 @@ tags: [attack.defense_evasion, attack.t1562.001]
 logsource: {product: linux, category: agent_tamper}
 detection:
   attempt:
-    action: [signal_ignored, unclean_restart, protection_removed, maintenance_rejected]
+    action: [signal_ignored, unclean_restart, protection_removed, maintenance_rejected, firewall_restored]
   condition: attempt

@@ -1,0 +1,15 @@
+id: xdr-fim-change
+title: "FIM: monitored file changed"
+description: A file monitored by file integrity monitoring drifted from its baseline.
+level: medium
+tags: [attack.defense_evasion, attack.t1565.001]
+logsource: {product: linux, category: fim}
+detection:
+  any:
+    detail|re: '.'
+  critical:
+    path|startswith: [/etc/passwd, /etc/shadow, /etc/group, /etc/gshadow, /etc/sudoers, /etc/ssh/, /etc/pam.d/,
+      /etc/ld.so.preload, /etc/crontab, /etc/cron., /etc/systemd/system/, /root/.ssh/]
+  binary:
+    path|startswith: [/usr/bin/, /usr/sbin/, /usr/local/bin/, /usr/local/sbin/, /bin/, /sbin/]
+  condition: any and not (critical or binary)

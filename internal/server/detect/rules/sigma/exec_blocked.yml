@@ -1,0 +1,10 @@
+id: xdr-exec-blocked
+title: Execution blocked by prevention policy
+description: The agent denied running a file whose SHA-256 is a hash IOC. The process never started; check how the file got onto the host.
+level: high
+tags: [attack.execution, attack.t1204.002]
+logsource: {product: linux, category: exec_blocked}
+detection:
+  blocked:
+    sha256|re: '^[0-9a-f]{64}$'
+  condition: blocked

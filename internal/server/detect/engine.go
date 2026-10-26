@@ -1,6 +1,7 @@
 package detect
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -9,6 +10,7 @@ import (
 	"net/netip"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/Bogan1011/xdr-agent/internal/server/store"
@@ -108,6 +110,55 @@ func YaraBundle(rules []store.Rule) (string, string, error) {
 	}
 	sum := sha256.Sum256([]byte(src))
 	return src, hex.EncodeToString(sum[:8]), nil
+}
+
+// BlockList packs the SHA-256 hash IOCs into concatenated 32-byte digests,
+// sorted so the content version does not depend on database order. Manual
+// indicators come before feed ones when the list is capped.
+func BlockList(iocs []store.IOC, limit int) []byte {
+	seen := map[[32]byte]bool{}
+	var manual, feed [][32]byte
+	for _, i := range iocs {
+		if i.Type != "sha256" {
+			continue
+		}
+		raw, err := hex.DecodeString(i.Value)
+		if err != nil || len(raw) != 32 {
+			continue
+		}
+		d := [32]byte(raw)
+		if seen[d] {
+			continue
+		}
+		seen[d] = true
+		if i.FeedID == 0 {
+			manual = append(manual, d)
+		} else {
+			feed = append(feed, d)
+		}
+	}
+	all := append(manual, feed...)
+	if len(all) > limit {
+		all = all[:limit]
+	}
+	slices.SortFunc(all, func(a, b [32]byte) int { return bytes.Compare(a[:], b[:]) })
+	out := make([]byte, 0, 32*len(all))
+	for _, d := range all {
+		out = append(out, d[:]...)
+	}
+	return out
+}
+
+// ContentVersion identifies a YARA bundle and block list; empty when both are.
+func ContentVersion(yaraSrc string, blocked []byte) string {
+	if yaraSrc == "" && len(blocked) == 0 {
+		return ""
+	}
+	h := sha256.New()
+	h.Write([]byte(yaraSrc))
+	h.Write([]byte{0})
+	h.Write(blocked)
+	return hex.EncodeToString(h.Sum(nil)[:8])
 }
 
 // Match is one detection on one event.
@@ -220,7 +271,9 @@ func (e *Engine) Evaluate(ev *store.Event) []Match {
 			})
 		}
 	}
-	if ev.SHA256 != "" {
+	// A blocked exec raises its own alert; the hash is on the list because
+	// it is an IOC, so a second IOC alert would only repeat it.
+	if ev.SHA256 != "" && ev.Type != "exec_blocked" {
 		if i, ok := e.hashes[strings.ToLower(ev.SHA256)]; ok {
 			out = append(out, iocMatch(i, ev.SHA256))
 		}

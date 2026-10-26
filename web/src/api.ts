@@ -76,7 +76,8 @@ export type CommandType =
   | "scan_path"
   | "update_agent"
   | "grant_elevation"
-  | "revoke_elevation";
+  | "revoke_elevation"
+  | "fim_rebaseline";
 
 export interface Command {
   id: string;
@@ -258,6 +259,30 @@ export interface PamSession {
   request_id: string;
 }
 
+export interface FirewallRule {
+  direction: "in" | "out";
+  action: "allow" | "deny";
+  protocol: "tcp" | "udp" | "icmp" | "any";
+  ports: string;
+  cidr: string;
+  comment: string;
+}
+
+export interface PreventionPolicy {
+  block_exec: boolean;
+  fim: { enabled: boolean; paths: string[]; exclude: string[]; interval_minutes: number };
+  firewall: { enabled: boolean; default_deny_inbound: boolean; rules: FirewallRule[] };
+}
+
+export interface PreventionState {
+  exec_blocking?: boolean;
+  blocked_hashes?: number;
+  fim_active?: boolean;
+  fim_files?: number;
+  firewall_applied?: boolean;
+  error?: string;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -379,6 +404,15 @@ export const api = {
   privilegedAccounts: () => request<Inventory[]>("GET", "/api/v1/pam/accounts"),
   pamSessions: (agentId = "") =>
     request<PamSession[]>("GET", `/api/v1/pam/sessions${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ""}`),
+  globalPrevention: () => request<{ policy: PreventionPolicy; blocked_hashes: number }>("GET", "/api/v1/prevention/policy"),
+  setGlobalPrevention: (p: PreventionPolicy) => request<void>("PUT", "/api/v1/prevention/policy", p),
+  agentPrevention: (agentId: string) =>
+    request<{ custom: boolean; policy: PreventionPolicy; state: PreventionState }>(
+      "GET",
+      `/api/v1/agents/${encodeURIComponent(agentId)}/prevention`,
+    ),
+  setAgentPrevention: (agentId: string, custom: boolean, policy?: PreventionPolicy) =>
+    request<void>("PUT", `/api/v1/agents/${encodeURIComponent(agentId)}/prevention`, { custom, policy }),
   pamSession: (id: number) => request<{ session: PamSession; output: string }>("GET", `/api/v1/pam/sessions/${id}`),
 };
 
@@ -392,6 +426,7 @@ export const commandLabels: Record<CommandType, string> = {
   update_agent: "Update agent",
   grant_elevation: "Grant sudo",
   revoke_elevation: "Revoke sudo",
+  fim_rebaseline: "New FIM baseline",
 };
 
 export const statusLabels: Record<AlertStatus, string> = {
@@ -404,8 +439,8 @@ export const statusLabels: Record<AlertStatus, string> = {
 export type Category = "process" | "file" | "network";
 
 export function categoryOf(type: string): Category {
-  if (type.startsWith("process")) return "process";
-  if (type.startsWith("file") || type === "yara_match") return "file";
+  if (type.startsWith("process") || type === "exec_blocked") return "process";
+  if (type.startsWith("file") || type === "yara_match" || type === "fim_change") return "file";
   return "network";
 }
 
@@ -422,6 +457,8 @@ export const typeLabels: Record<string, string> = {
   net_listen: "Listening port",
   yara_match: "YARA match",
   agent_tamper: "Agent tamper",
+  exec_blocked: "Exec blocked",
+  fim_change: "Integrity drift",
 };
 
 export function timeAgo(iso: string): string {

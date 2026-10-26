@@ -1,0 +1,11 @@
+id: xdr-fim-critical
+title: "FIM: critical system file changed"
+description: A file monitored by file integrity monitoring drifted from its baseline in accounts, sudo, SSH, PAM, cron, systemd or the dynamic loader configuration. Accept the change with a new baseline if it was planned.
+level: high
+tags: [attack.persistence, attack.privilege_escalation, attack.defense_evasion, attack.t1543, attack.t1098]
+logsource: {product: linux, category: fim}
+detection:
+  critical:
+    path|startswith: [/etc/passwd, /etc/shadow, /etc/group, /etc/gshadow, /etc/sudoers, /etc/ssh/, /etc/pam.d/,
+      /etc/ld.so.preload, /etc/crontab, /etc/cron., /etc/systemd/system/, /root/.ssh/]
+  condition: critical

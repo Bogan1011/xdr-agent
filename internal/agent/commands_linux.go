@@ -14,6 +14,7 @@ import (
 // agent's own service so that stopping the service does not kill it.
 const uninstallScript = `sleep 2
 nft delete table inet xdr_isolation 2>/dev/null || true
+nft delete table inet xdr_firewall 2>/dev/null || true
 systemctl disable --now xdr-agent 2>/dev/null || true
 rm -rf /etc/systemd/system/xdr-agent.service /etc/systemd/system/xdr-agent.service.d
 systemctl daemon-reload
@@ -67,6 +68,10 @@ func (a *Agent) respond(ctx context.Context, c *xdrv1.AgentCommand) {
 		msg, err = a.pam.Grant(c.Args)
 	case xdrv1.CommandType_COMMAND_TYPE_REVOKE_ELEVATION:
 		msg, err = a.pam.Revoke(c.Args)
+	case xdrv1.CommandType_COMMAND_TYPE_FIM_REBASELINE:
+		rctx, cancel := context.WithTimeout(ctx, time.Hour)
+		msg, err = a.prev.fim.Rebaseline(rctx)
+		cancel()
 	default:
 		err = fmt.Errorf("unsupported command %s", c.Type)
 	}

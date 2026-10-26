@@ -160,6 +160,32 @@ Then revoke or delete the endpoint in the console.
   NOPASSWD, SSH key count and last login. An account that gains a new path
   to root raises a **New privileged account** alert.
 
+## Prevention
+
+Set fleet-wide under **Prevention**, or per endpoint with **Customize for
+this endpoint** on its page. Endpoints apply changes at their next check-in
+and keep the last policy across reboots.
+
+* **Exec blocking.** With *Block execution of hash IOCs* on, the agent
+  denies running any file whose SHA-256 is a hash IOC (manual or from a
+  feed, up to 500,000) using fanotify permission events (Linux 5.0+). The
+  process never starts and an **Execution blocked** alert is raised. Scripts
+  started through an interpreter (`bash evil.sh`) are not execs of the
+  script and are not blocked; `./evil.sh` is.
+* **File integrity monitoring.** The agent records a baseline (SHA-256,
+  mode, owner) of the monitored paths, then reports files added, removed or
+  changed: within seconds when the file collectors see the change, and on a
+  full rescan every interval. Each change is reported once and stays
+  visible until someone clicks **Accept changes as FIM baseline** (e.g.
+  after patching). Alerts: critical system files and system binaries are
+  high, everything else medium.
+* **Host firewall.** Inbound and outbound allow/deny rules by protocol,
+  port and remote CIDR, applied atomically as the nftables table
+  `inet xdr_firewall`, optionally denying unsolicited inbound traffic by
+  default. Loopback, established connections, DHCP and the console are
+  always allowed. If someone deletes the table the agent restores it and
+  raises a tamper alert.
+
 See [docs/comparison.md](docs/comparison.md) for how this product compares
 with Trend Micro Vision One and CrowdStrike Falcon, and the gaps that set
 the roadmap.
@@ -211,7 +237,11 @@ with `cd web && npm run dev` (it proxies `/api` to `:8080`).
 3. **Fleet management** (done): remote install and uninstall from
    the console over SSH, agent self-update with rollback, tamper protection,
    SSH host key pinning.
-4. **PAM** (this release): just-in-time sudo elevation with approval,
+4. **PAM** (done): just-in-time sudo elevation with approval,
    session recording, privileged account inventory, and the
    [comparison](docs/comparison.md) with Vision One and CrowdStrike Falcon.
-5. **Windows agent**, then the gaps listed in the comparison.
+5. **Prevention** (this release): exec blocking of hash IOCs, file
+   integrity monitoring with baselines, host firewall policy.
+6. The remaining Linux gaps in the comparison (investigation, console
+   hardening, vulnerability and posture, live response), then the Windows
+   agent.

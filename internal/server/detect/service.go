@@ -34,7 +34,13 @@ type Service struct {
 	reload  sync.Mutex
 }
 
-type content struct{ version, yara string }
+type content struct {
+	version, yara string
+	blocked       []byte
+}
+
+// maxBlocked caps the hash block list sent to agents (16 MiB of digests).
+const maxBlocked = 500000
 
 // Init seeds the built-in rules and builds the first engine.
 func (s *Service) Init(ctx context.Context) error {
@@ -65,25 +71,29 @@ func (s *Service) Reload(ctx context.Context) error {
 		s.Log.Warn("skipping rule", "err", err)
 	}
 	s.engine.Store(e)
-	src, ver, err := YaraBundle(rules)
+	src, _, err := YaraBundle(rules)
+	blocked := BlockList(iocs, maxBlocked)
+	ver := ContentVersion(src, blocked)
 	if err != nil {
 		// Keep serving the previous bundle; saving rules validates the bundle,
 		// so this only happens with rules written to the database directly.
 		s.Log.Error("YARA bundle does not compile, agents keep the previous rules", "err", err)
 	} else {
-		s.content.Store(&content{version: ver, yara: src})
+		s.content.Store(&content{version: ver, yara: src, blocked: blocked})
 	}
 	sig, yr, n := e.Counts()
-	s.Log.Info("detection content loaded", "sigma_rules", sig, "yara_rules", yr, "iocs", n, "yara_version", ver)
+	s.Log.Info("detection content loaded", "sigma_rules", sig, "yara_rules", yr, "iocs", n,
+		"blocked_hashes", len(blocked)/32, "content_version", ver)
 	return nil
 }
 
-// Content is the YARA bundle agents run and its version.
-func (s *Service) Content() (version, yara string) {
+// Content is the YARA bundle agents run, the hash block list for exec
+// blocking (concatenated SHA-256 digests) and their combined version.
+func (s *Service) Content() (version, yara string, blocked []byte) {
 	if c := s.content.Load(); c != nil {
-		return c.version, c.yara
+		return c.version, c.yara, c.blocked
 	}
-	return "", ""
+	return "", "", nil
 }
 
 // Process evaluates ingested events and raises alerts.
@@ -147,7 +157,7 @@ func (s *Service) autoRespond(ctx context.Context, alertID int64, action string,
 }
 
 // CommandTypes are the response actions the console can send.
-var CommandTypes = []string{"kill_process", "quarantine_file", "restore_file", "isolate_host", "unisolate_host", "scan_path"}
+var CommandTypes = []string{"fim_rebaseline", "kill_process", "quarantine_file", "restore_file", "isolate_host", "unisolate_host", "scan_path"}
 
 // ValidateCommand checks a command's arguments before it is queued.
 func ValidateCommand(typ string, args map[string]string) error {
@@ -190,7 +200,7 @@ func ValidateCommand(typ string, args map[string]string) error {
 				}
 			}
 		}
-	case "unisolate_host":
+	case "unisolate_host", "fim_rebaseline":
 	case "grant_elevation":
 		if err := need("user"); err != nil {
 			return err

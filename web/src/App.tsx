@@ -11,6 +11,7 @@ import Alerts from "./pages/Alerts";
 import Rules from "./pages/Rules";
 import IOCs from "./pages/IOCs";
 import PAM from "./pages/PAM";
+import Prevention from "./pages/Prevention";
 import { usePoll } from "./hooks";
 
 export default function App() {
@@ -44,6 +45,7 @@ function Shell({ user, onSignOut }: { user: string; onSignOut: () => void }) {
           <NavLink to="/events">Event search</NavLink>
           <NavLink to="/rules">Detection rules</NavLink>
           <NavLink to="/iocs">Threat intel</NavLink>
+          <NavLink to="/prevention">Prevention</NavLink>
           <NavLink to="/pam">
             Privileged access{pam.data?.pending ? <span className="nav-count">{pam.data.pending}</span> : null}
           </NavLink>
@@ -70,6 +72,7 @@ function Shell({ user, onSignOut }: { user: string; onSignOut: () => void }) {
           <Route path="/rules" element={<Rules />} />
           <Route path="/iocs" element={<IOCs />} />
           <Route path="/pam" element={<PAM />} />
+          <Route path="/prevention" element={<Prevention />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
