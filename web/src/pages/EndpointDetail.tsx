@@ -4,7 +4,7 @@ import { api, formatBytes, timeAgo } from "../api";
 import { usePoll } from "../hooks";
 import EventTable from "../components/EventTable";
 import Timeline from "../components/Timeline";
-import { StatusBadge, isSet } from "./Endpoints";
+import { ProtectionBadge, StatusBadge, VersionCell, isOutdated, isSet } from "./Endpoints";
 import { CommandList, EndpointResponse } from "../components/Response";
 import { AlertTable } from "./Alerts";
 
@@ -17,6 +17,8 @@ export default function EndpointDetail() {
   const events = usePoll(() => api.events({ agent_id: id, type, limit: 100 }), 10000, [id, type]);
   const alerts = usePoll(() => api.alerts({ agent_id: id, limit: 50 }), 15000, [id]);
   const commands = usePoll(() => api.commands(id), 5000, [id]);
+  const fleet = usePoll(api.fleet, 60000);
+  const [token, setToken] = useState("");
 
   const a = agent.data;
   if (agent.error) return <div className="error">{agent.error}</div>;
@@ -32,6 +34,21 @@ export default function EndpointDetail() {
     await api.uninstallAgent(id);
     agent.refresh();
   }
+  async function update() {
+    if (!confirm(`Update ${a!.hostname} from ${a!.agent_version} to ${fleet.data!.version}? The agent restarts, and rolls back on its own if the new version cannot reach the console.`)) return;
+    await api.updateAgent(id);
+    agent.refresh();
+    commands.refresh();
+  }
+  async function toggleProtection() {
+    const on = !a!.tamper_protection;
+    if (!on && !confirm(`Turn tamper protection off on ${a!.hostname}? Anyone with root on the host can then stop or remove the agent.`)) return;
+    await api.setTamperProtection(id, on);
+    agent.refresh();
+  }
+  async function showToken() {
+    setToken(token ? "" : (await api.maintenanceToken(id)).token);
+  }
   async function remove() {
     if (!confirm(`Delete ${a!.hostname} from the console? Its events are kept until they expire.`)) return;
     await api.deleteAgent(id);
@@ -46,6 +63,7 @@ export default function EndpointDetail() {
           <h1>{a.hostname}</h1>
         </div>
         <div className="actions">
+          {!a.revoked && !a.updating && isOutdated(a, fleet.data) && <button onClick={update}>Update to {fleet.data!.version}</button>}
           {!a.revoked && !a.pending_command && <button onClick={uninstall}>Uninstall</button>}
           {!a.revoked && <button onClick={revoke}>Revoke</button>}
           <button className="danger" onClick={remove}>Delete</button>
@@ -59,7 +77,27 @@ export default function EndpointDetail() {
           <div><dt>OS</dt><dd>{a.os_version}</dd></div>
           <div><dt>Kernel</dt><dd className="mono">{a.kernel} ({a.arch})</dd></div>
           <div><dt>IP addresses</dt><dd className="mono">{a.ip_addresses.join(", ")}</dd></div>
-          <div><dt>Agent version</dt><dd className="mono">{a.agent_version}</dd></div>
+          <div><dt>Agent version</dt><dd><VersionCell agent={a} fleet={fleet.data} /></dd></div>
+          <div>
+            <dt>Tamper protection</dt>
+            <dd>
+              <ProtectionBadge agent={a} />{" "}
+              {!a.revoked && <button className="link" onClick={toggleProtection}>{a.tamper_protection ? "Turn off" : "Turn on"}</button>}{" "}
+              <button className="link" onClick={showToken}>{token ? "Hide maintenance token" : "Show maintenance token"}</button>
+            </dd>
+          </div>
+          {token && (
+            <div className="wide">
+              <dt>Maintenance token</dt>
+              <dd>
+                <code className="mono">{token}</code>
+                <div className="muted">
+                  Unlocks the agent on the host without the console: <code>sudo xdr-agent maintenance --token {token}</code>, or
+                  uninstall with <code>curl -fsSL {location.origin}/uninstall.sh | sudo bash -s -- --token {token}</code>
+                </div>
+              </dd>
+            </div>
+          )}
           <div><dt>Agent CPU / memory</dt><dd>{a.cpu_percent.toFixed(1)}% · {formatBytes(a.rss_bytes)}</dd></div>
           <div><dt>Events sent / dropped</dt><dd>{a.events_sent.toLocaleString()} / {a.events_dropped.toLocaleString()}</dd></div>
           <div><dt>Enrolled</dt><dd>{new Date(a.enrolled_at).toLocaleString()}</dd></div>
@@ -104,6 +142,7 @@ export default function EndpointDetail() {
             <option value="process_exec,process_exit">Process</option>
             <option value="file_create,file_modify,file_delete,file_rename,file_attrib">File</option>
             <option value="net_connect,net_listen">Network</option>
+            <option value="agent_tamper">Agent tamper</option>
           </select>
         </div>
         {events.data && <EventTable events={events.data} showHost={false} />}

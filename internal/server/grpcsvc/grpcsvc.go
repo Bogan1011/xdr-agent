@@ -4,10 +4,13 @@ package grpcsvc
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -20,10 +23,15 @@ import (
 	xdrv1 "github.com/Bogan1011/xdr-agent/gen/xdr/v1"
 	"github.com/Bogan1011/xdr-agent/internal/server/detect"
 	"github.com/Bogan1011/xdr-agent/internal/server/pki"
+	"github.com/Bogan1011/xdr-agent/internal/server/release"
 	"github.com/Bogan1011/xdr-agent/internal/server/store"
 )
 
-const maxBatch = 5000
+const (
+	maxBatch = 5000
+	// binaryChunk stays well under gRPC's default 4 MiB message limit.
+	binaryChunk = 1 << 20
+)
 
 type Enrollment struct {
 	xdrv1.UnimplementedEnrollmentServiceServer
@@ -65,6 +73,8 @@ type Agents struct {
 	Events *store.ClickHouse
 	Detect *detect.Service
 	Log    *slog.Logger
+	// DownloadsDir holds the agent binaries offered for self-update.
+	DownloadsDir string
 }
 
 var commandTypes = map[string]xdrv1.CommandType{
@@ -74,6 +84,7 @@ var commandTypes = map[string]xdrv1.CommandType{
 	"isolate_host":    xdrv1.CommandType_COMMAND_TYPE_ISOLATE_HOST,
 	"unisolate_host":  xdrv1.CommandType_COMMAND_TYPE_UNISOLATE_HOST,
 	"scan_path":       xdrv1.CommandType_COMMAND_TYPE_SCAN_PATH,
+	"update_agent":    xdrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT,
 }
 
 type ctxKey struct{}
@@ -116,11 +127,17 @@ func (s *Agents) Heartbeat(ctx context.Context, req *xdrv1.HeartbeatRequest) (*x
 			return nil, status.Error(codes.Unavailable, "store unavailable")
 		}
 	}
-	if err := s.DB.SetAgentState(ctx, a.id, req.Isolated, req.ContentVersion); err != nil {
+	if err := s.DB.SetAgentState(ctx, a.id, req.Isolated, req.ContentVersion, req.TamperProtected); err != nil {
 		s.Log.Warn("agent state update", "agent_id", a.id, "err", err)
 	}
 	resp := &xdrv1.HeartbeatResponse{ServerTimeUnix: time.Now().Unix()}
 	resp.ContentVersion, _ = s.Detect.Content()
+	if on, tok, err := s.DB.TamperPolicy(ctx, a.id); err == nil {
+		sum := sha256.Sum256([]byte(tok))
+		resp.Tamper = &xdrv1.TamperPolicy{Enabled: on, MaintenanceTokenSha256: hex.EncodeToString(sum[:])}
+	} else {
+		s.Log.Warn("tamper policy", "agent_id", a.id, "err", err)
+	}
 	cmds, err := s.DB.TakeCommands(ctx, a.id)
 	if err != nil {
 		s.Log.Error("take response commands", "agent_id", a.id, "err", err)
@@ -177,6 +194,39 @@ func (s *Agents) ReportCommandResult(ctx context.Context, req *xdrv1.CommandResu
 	return &xdrv1.CommandResultAck{}, nil
 }
 
+func (s *Agents) GetAgentBinary(ctx context.Context, req *xdrv1.AgentBinaryRequest) (*xdrv1.AgentBinaryChunk, error) {
+	rel, err := release.Load(s.DownloadsDir)
+	if err != nil {
+		s.Log.Error("load agent release", "err", err)
+		return nil, status.Error(codes.Unavailable, "no agent release available")
+	}
+	path, err := rel.Path(req.Arch)
+	if err != nil {
+		return nil, status.Error(codes.NotFound, err.Error())
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, "agent binary unavailable")
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, "agent binary unavailable")
+	}
+	if req.Offset > uint64(st.Size()) {
+		return nil, status.Error(codes.OutOfRange, "offset past end of binary")
+	}
+	buf := make([]byte, binaryChunk)
+	n, err := f.ReadAt(buf, int64(req.Offset))
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, status.Error(codes.Unavailable, "read agent binary")
+	}
+	if req.Offset == 0 {
+		s.Log.Info("agent downloading update", "agent_id", fromCtx(ctx).id, "version", rel.Version, "arch", req.Arch)
+	}
+	return &xdrv1.AgentBinaryChunk{Data: buf[:n], TotalSize: uint64(st.Size()), Version: rel.Version}, nil
+}
+
 func truncate(s string, n int) string {
 	if len(s) > n {
 		return s[:n]
@@ -221,6 +271,10 @@ func toRow(a agentCtx, e *xdrv1.Event) store.Event {
 		r.Path, r.SHA256, r.Size, r.PID = y.Path, y.Sha256, y.Size, y.Pid
 		// The matched rule names are kept in args.
 		r.Args = strings.Join(y.Rules, ", ")
+	case *xdrv1.Event_Tamper:
+		t := p.Tamper
+		// The action is kept in path so rules can match it exactly.
+		r.Path, r.Args, r.PID, r.Exe = t.Action, t.Detail, t.Pid, t.Exe
 	}
 	return r
 }

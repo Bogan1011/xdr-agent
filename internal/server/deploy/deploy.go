@@ -187,17 +187,26 @@ func (d *Deployer) install(ctx context.Context, host string, r Request, auth []s
 		return fmt.Errorf("create enrollment token: %w", err)
 	}
 
-	addr := net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(r.Port))
+	hostName := strings.Trim(host, "[]")
+	addr := net.JoinHostPort(hostName, strconv.Itoa(r.Port))
 	l.printf("Connecting to %s as %s", addr, r.Username)
 	cfg := &ssh.ClientConfig{
 		User: r.Username,
 		Auth: auth,
-		// Trust on first use: the key is recorded in the job so it can be
-		// checked. Pinning known host keys is planned for fleet management.
+		// Trust on first use: the first key seen for host:port is pinned and
+		// later installs refuse a different one.
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
+			fp := ssh.FingerprintSHA256(key)
 			l.mu.Lock()
-			l.hostKey = ssh.FingerprintSHA256(key)
+			l.hostKey = fp
 			l.mu.Unlock()
+			pinned, err := d.DB.KnownHostKey(ctx, hostName, r.Port)
+			if err != nil {
+				return fmt.Errorf("look up pinned host key: %w", err)
+			}
+			if pinned != "" && pinned != fp {
+				return fmt.Errorf("host key changed: pinned %s, got %s. If the host was rebuilt, forget its key on the Deploy page", pinned, fp)
+			}
 			return nil
 		},
 		Timeout: 15 * time.Second,
@@ -215,6 +224,9 @@ func (d *Deployer) install(ctx context.Context, host string, r Request, auth []s
 	defer client.Close()
 	_, key := l.snapshot()
 	l.printf("Connected. Host key %s", key)
+	if err := d.DB.PinHostKey(ctx, hostName, r.Port, key); err != nil {
+		l.printf("WARNING: could not pin the host key: %v", err)
+	}
 
 	sess, err := client.NewSession()
 	if err != nil {

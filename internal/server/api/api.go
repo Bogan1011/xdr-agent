@@ -80,6 +80,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/enrollment-tokens/{id}", a.auth(a.revokeToken))
 	mux.HandleFunc("GET /api/v1/install-info", a.auth(a.installInfo))
 	a.detectionRoutes(mux)
+	a.fleetRoutes(mux)
 
 	// Public: the installer fetches these before the host has any identity.
 	mux.HandleFunc("GET /pki/ca.crt", a.caCert)

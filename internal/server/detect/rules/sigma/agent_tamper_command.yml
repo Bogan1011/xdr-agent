@@ -1,0 +1,15 @@
+id: lnx-xdr-agent-tamper-command
+title: Command aimed at stopping or removing the XDR agent
+description: systemctl, kill or file tools run against the XDR agent's service or files.
+level: high
+tags: [attack.defense_evasion, attack.t1562.001]
+logsource: {product: linux, category: process_creation}
+detection:
+  systemctl:
+    exe|endswith: /systemctl
+    cmdline|contains: [' stop ', ' disable ', ' mask ', ' kill ', ' edit ', ' revert ']
+  tools:
+    exe|endswith: [/chattr, /pkill, /killall, /rm, /mv, /unlink, /shred]
+  target:
+    cmdline|contains: xdr-agent
+  condition: (systemctl or tools) and target

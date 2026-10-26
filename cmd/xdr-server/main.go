@@ -128,7 +128,8 @@ func run(log *slog.Logger) error {
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		MinVersion:   tls.VersionTLS13,
 	}
-	agents := &grpcsvc.Agents{DB: db, Events: events, Detect: det, Log: log}
+	downloads := env("XDR_DOWNLOADS_DIR", "")
+	agents := &grpcsvc.Agents{DB: db, Events: events, Detect: det, Log: log, DownloadsDir: downloads}
 	agentSrv := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(agentTLS)),
 		grpc.UnaryInterceptor(agents.AuthInterceptor),
@@ -146,7 +147,7 @@ func run(log *slog.Logger) error {
 			EnrollPort:    enrollPort,
 			AgentPort:     agentPort,
 			WebDir:        env("XDR_WEB_DIR", ""),
-			DownloadsDir:  env("XDR_DOWNLOADS_DIR", ""),
+			DownloadsDir:  downloads,
 		}, db, events, ca, &deploy.Deployer{DB: db, Log: log}, det, log).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

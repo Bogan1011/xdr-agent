@@ -21,6 +21,22 @@ export interface Agent {
   uninstalled_at: string;
   isolated: boolean;
   content_version: string;
+  tamper_protection: boolean;
+  tamper_protected: boolean;
+  updating: boolean;
+}
+
+export interface Fleet {
+  version: string;
+  sha256: Record<string, string>;
+  error?: string;
+}
+
+export interface KnownHost {
+  host: string;
+  port: number;
+  fingerprint: string;
+  first_seen: string;
 }
 
 export type Severity = "low" | "medium" | "high" | "critical";
@@ -56,7 +72,8 @@ export type CommandType =
   | "restore_file"
   | "isolate_host"
   | "unisolate_host"
-  | "scan_path";
+  | "scan_path"
+  | "update_agent";
 
 export interface Command {
   id: string;
@@ -227,6 +244,16 @@ export const api = {
   agent: (id: string) => request<Agent>("GET", `/api/v1/agents/${encodeURIComponent(id)}`),
   revokeAgent: (id: string) => request<void>("POST", `/api/v1/agents/${encodeURIComponent(id)}/revoke`, {}),
   uninstallAgent: (id: string) => request<void>("POST", `/api/v1/agents/${encodeURIComponent(id)}/uninstall`, {}),
+  fleet: () => request<Fleet>("GET", "/api/v1/fleet"),
+  updateAgent: (id: string) => request<void>("POST", `/api/v1/agents/${encodeURIComponent(id)}/update`, {}),
+  updateAllAgents: () => request<{ queued: number }>("POST", "/api/v1/agents/update-all", {}),
+  setTamperProtection: (id: string, enabled: boolean) =>
+    request<void>("POST", `/api/v1/agents/${encodeURIComponent(id)}/tamper-protection`, { enabled }),
+  maintenanceToken: (id: string) =>
+    request<{ token: string }>("GET", `/api/v1/agents/${encodeURIComponent(id)}/maintenance-token`),
+  knownHosts: () => request<KnownHost[]>("GET", "/api/v1/known-hosts"),
+  forgetKnownHost: (host: string, port: number) =>
+    request<void>("DELETE", `/api/v1/known-hosts/${encodeURIComponent(host)}/${port}`),
   deployJobs: () => request<DeployJob[]>("GET", "/api/v1/deploy-jobs"),
   remoteInstall: (r: RemoteInstall) => request<{ job_ids: number[] }>("POST", "/api/v1/deploy-jobs", r),
   deleteAgent: (id: string) => request<void>("DELETE", `/api/v1/agents/${encodeURIComponent(id)}`),
@@ -284,6 +311,7 @@ export const commandLabels: Record<CommandType, string> = {
   isolate_host: "Isolate host",
   unisolate_host: "End isolation",
   scan_path: "YARA scan",
+  update_agent: "Update agent",
 };
 
 export const statusLabels: Record<AlertStatus, string> = {
@@ -313,6 +341,7 @@ export const typeLabels: Record<string, string> = {
   net_accept: "Inbound connection",
   net_listen: "Listening port",
   yara_match: "YARA match",
+  agent_tamper: "Agent tamper",
 };
 
 export function timeAgo(iso: string): string {

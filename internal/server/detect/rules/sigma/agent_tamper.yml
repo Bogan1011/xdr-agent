@@ -1,0 +1,10 @@
+id: xdr-agent-tamper
+title: XDR agent tamper attempt
+description: Something tried to stop, change or bypass the XDR agent while tamper protection was on.
+level: high
+tags: [attack.defense_evasion, attack.t1562.001]
+logsource: {product: linux, category: agent_tamper}
+detection:
+  attempt:
+    action: [signal_ignored, unclean_restart, protection_removed, maintenance_rejected]
+  condition: attempt

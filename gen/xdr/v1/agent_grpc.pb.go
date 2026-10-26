@@ -133,6 +133,7 @@ const (
 	AgentService_SendEvents_FullMethodName          = "/xdr.v1.AgentService/SendEvents"
 	AgentService_GetDetectionContent_FullMethodName = "/xdr.v1.AgentService/GetDetectionContent"
 	AgentService_ReportCommandResult_FullMethodName = "/xdr.v1.AgentService/ReportCommandResult"
+	AgentService_GetAgentBinary_FullMethodName      = "/xdr.v1.AgentService/GetAgentBinary"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -150,6 +151,10 @@ type AgentServiceClient interface {
 	GetDetectionContent(ctx context.Context, in *DetectionContentRequest, opts ...grpc.CallOption) (*DetectionContent, error)
 	// Outcome of a response command delivered through the heartbeat.
 	ReportCommandResult(ctx context.Context, in *CommandResult, opts ...grpc.CallOption) (*CommandResultAck, error)
+	// One chunk of the agent binary the console offers, for self-update. Unary
+	// per chunk so the mTLS auth interceptor covers it and a failed chunk is
+	// retried alone.
+	GetAgentBinary(ctx context.Context, in *AgentBinaryRequest, opts ...grpc.CallOption) (*AgentBinaryChunk, error)
 }
 
 type agentServiceClient struct {
@@ -200,6 +205,16 @@ func (c *agentServiceClient) ReportCommandResult(ctx context.Context, in *Comman
 	return out, nil
 }
 
+func (c *agentServiceClient) GetAgentBinary(ctx context.Context, in *AgentBinaryRequest, opts ...grpc.CallOption) (*AgentBinaryChunk, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AgentBinaryChunk)
+	err := c.cc.Invoke(ctx, AgentService_GetAgentBinary_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -215,6 +230,10 @@ type AgentServiceServer interface {
 	GetDetectionContent(context.Context, *DetectionContentRequest) (*DetectionContent, error)
 	// Outcome of a response command delivered through the heartbeat.
 	ReportCommandResult(context.Context, *CommandResult) (*CommandResultAck, error)
+	// One chunk of the agent binary the console offers, for self-update. Unary
+	// per chunk so the mTLS auth interceptor covers it and a failed chunk is
+	// retried alone.
+	GetAgentBinary(context.Context, *AgentBinaryRequest) (*AgentBinaryChunk, error)
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -236,6 +255,9 @@ func (UnimplementedAgentServiceServer) GetDetectionContent(context.Context, *Det
 }
 func (UnimplementedAgentServiceServer) ReportCommandResult(context.Context, *CommandResult) (*CommandResultAck, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReportCommandResult not implemented")
+}
+func (UnimplementedAgentServiceServer) GetAgentBinary(context.Context, *AgentBinaryRequest) (*AgentBinaryChunk, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAgentBinary not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -330,6 +352,24 @@ func _AgentService_ReportCommandResult_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_GetAgentBinary_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AgentBinaryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).GetAgentBinary(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_GetAgentBinary_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).GetAgentBinary(ctx, req.(*AgentBinaryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -352,6 +392,10 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReportCommandResult",
 			Handler:    _AgentService_ReportCommandResult_Handler,
+		},
+		{
+			MethodName: "GetAgentBinary",
+			Handler:    _AgentService_GetAgentBinary_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

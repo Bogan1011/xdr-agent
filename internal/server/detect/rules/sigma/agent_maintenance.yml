@@ -1,0 +1,10 @@
+id: xdr-agent-maintenance
+title: XDR agent protection suspended locally
+description: Someone entered the maintenance token on the host, which lets the agent be stopped or uninstalled.
+level: low
+tags: [attack.defense_evasion, attack.t1562.001]
+logsource: {product: linux, category: agent_tamper}
+detection:
+  maint:
+    action: maintenance
+  condition: maint

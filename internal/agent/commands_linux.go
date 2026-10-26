@@ -15,7 +15,7 @@ import (
 const uninstallScript = `sleep 2
 nft delete table inet xdr_isolation 2>/dev/null || true
 systemctl disable --now xdr-agent 2>/dev/null || true
-rm -f /etc/systemd/system/xdr-agent.service
+rm -rf /etc/systemd/system/xdr-agent.service /etc/systemd/system/xdr-agent.service.d
 systemctl daemon-reload
 rm -f /usr/local/bin/xdr-agent
 rm -rf /etc/xdr-agent /var/lib/xdr-agent`
@@ -24,6 +24,7 @@ func (a *Agent) runCommand(ctx context.Context, c *xdrv1.AgentCommand) {
 	switch c.Type {
 	case xdrv1.CommandType_COMMAND_TYPE_UNINSTALL:
 		a.log.Warn("uninstall requested by the console", "command_id", c.Id)
+		a.tamper.Release()
 		cmd := exec.Command("systemd-run", "--unit=xdr-agent-uninstall", "--collect", "/bin/sh", "-c", uninstallScript)
 		if _, err := exec.LookPath("systemd-run"); err != nil {
 			// No systemd-run: detach into a new session instead.
@@ -60,6 +61,8 @@ func (a *Agent) respond(ctx context.Context, c *xdrv1.AgentCommand) {
 		sctx, cancel := context.WithTimeout(ctx, time.Hour)
 		msg, err = a.scanner.ScanPath(sctx, c.Args["path"])
 		cancel()
+	case xdrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT:
+		msg, err = a.selfUpdate(ctx, c.Args)
 	default:
 		err = fmt.Errorf("unsupported command %s", c.Type)
 	}
@@ -78,12 +81,16 @@ func (a *Agent) respond(ctx context.Context, c *xdrv1.AgentCommand) {
 		_, rerr := a.client.ReportCommandResult(cctx, res)
 		cancel()
 		if rerr == nil {
-			return
+			break
 		}
 		a.log.Warn("reporting command result failed", "err", rerr)
 		select {
 		case <-ctx.Done():
 		case <-time.After(time.Duration(i+1) * 5 * time.Second):
 		}
+	}
+	if c.Type == xdrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT && err == nil && a.loadPending() != nil {
+		a.log.Info("restarting into the updated agent")
+		a.cancel()
 	}
 }

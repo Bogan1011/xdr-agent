@@ -23,6 +23,13 @@ export default function RemoteInstall() {
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
   const jobs = usePoll(api.deployJobs, 2000);
+  const known = usePoll(api.knownHosts, 10000);
+
+  async function forget(host: string, port: number) {
+    if (!confirm(`Forget the pinned SSH host key of ${host}:${port}? The next install trusts whatever key the host presents.`)) return;
+    await api.forgetKnownHost(host, port);
+    known.refresh();
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -125,6 +132,31 @@ export default function RemoteInstall() {
                       </tr>
                     )}
                   </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="card">
+        <h2>Pinned SSH host keys</h2>
+        <p className="muted">The first key a host presents is pinned. Installs to a host whose key changed fail until you forget the old key here.</p>
+        {known.data && known.data.length === 0 && <div className="empty">No hosts yet.</div>}
+        {known.data && known.data.length > 0 && (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Host</th><th>Fingerprint</th><th>First seen</th><th></th></tr>
+              </thead>
+              <tbody>
+                {known.data.map((k) => (
+                  <tr key={`${k.host}:${k.port}`}>
+                    <td className="mono">{k.host}:{k.port}</td>
+                    <td className="mono truncate" title={k.fingerprint}>{k.fingerprint}</td>
+                    <td>{timeAgo(k.first_seen)}</td>
+                    <td><button className="link" onClick={() => forget(k.host, k.port)}>Forget</button></td>
+                  </tr>
                 ))}
               </tbody>
             </table>

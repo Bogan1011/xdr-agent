@@ -498,8 +498,10 @@ func (p *Postgres) ListCommands(ctx context.Context, agentID string, alertID int
 	return pgx.CollectRows(rows, scanCommand)
 }
 
-// SetAgentState records the isolation state and content version the agent reports.
-func (p *Postgres) SetAgentState(ctx context.Context, id string, isolated bool, contentVersion string) error {
-	_, err := p.pool.Exec(ctx, `UPDATE agents SET isolated=$2, content_version=$3 WHERE id=$1`, id, isolated, contentVersion)
+// SetAgentState records the isolation, content version and tamper
+// protection state the agent reports.
+func (p *Postgres) SetAgentState(ctx context.Context, id string, isolated bool, contentVersion string, tamperProtected bool) error {
+	_, err := p.pool.Exec(ctx, `UPDATE agents SET isolated=$2, content_version=$3, tamper_protected=$4 WHERE id=$1`,
+		id, isolated, contentVersion, tamperProtected)
 	return err
 }

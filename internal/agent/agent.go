@@ -38,17 +38,27 @@ type Agent struct {
 	client  xdrv1.AgentServiceClient
 	scanner *Scanner
 	wake    chan struct{}
+
+	tamper *Tamper
+	upd    updater
+	// cancel stops Run, e.g. to restart into an updated binary.
+	cancel context.CancelFunc
 }
 
 func New(cfg *Config, log *slog.Logger) *Agent {
-	return &Agent{
+	a := &Agent{
 		cfg:   cfg,
 		log:   log,
 		queue: make(chan *xdrv1.Event, cfg.QueueSize),
 		start: time.Now(),
 		wake:  make(chan struct{}, 1),
 	}
+	a.tamper = newTamper(cfg, log.With("component", "tamper"), a.tamperEvent)
+	return a
 }
+
+// StopAllowed decides whether a termination signal may stop the agent.
+func (a *Agent) StopAllowed(sig os.Signal) bool { return a.tamper.StopAllowed(sig) }
 
 // wakeHeartbeat sends a heartbeat now, so state changes show up quickly.
 func (a *Agent) wakeHeartbeat() {
@@ -76,6 +86,14 @@ func (a *Agent) send(e *xdrv1.Event) {
 }
 
 func (a *Agent) Run(ctx context.Context) error {
+	ctx, a.cancel = context.WithCancel(ctx)
+	defer a.cancel()
+	defer a.clearRunningMarker()
+	a.checkUncleanExit()
+	a.checkUpdate(ctx)
+	// Protection applies from the last known policy, before the console is reachable.
+	go a.tamper.Run(ctx)
+
 	host := HostInfo()
 	var id *Identity
 	for {
@@ -229,10 +247,15 @@ func (a *Agent) heartbeatLoop(ctx context.Context, client xdrv1.AgentServiceClie
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		resp, err := client.Heartbeat(cctx, &xdrv1.HeartbeatRequest{
 			Host: host, Stats: a.stats(), Isolated: a.Isolated(), ContentVersion: a.scanner.Version(),
+			TamperProtected: a.tamper.Applied(),
 		})
 		cancel()
 		if err != nil && ctx.Err() == nil {
 			a.log.Warn("heartbeat failed", "err", err)
+		}
+		if err == nil {
+			a.confirmUpdate()
+			a.tamper.SetPolicy(resp.Tamper)
 		}
 		if err == nil && resp.ContentVersion != a.scanner.Version() {
 			a.updateContent(ctx, client)
