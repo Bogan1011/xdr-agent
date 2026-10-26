@@ -19,6 +19,7 @@ import (
 
 	xdrv1 "github.com/Bogan1011/xdr-agent/gen/xdr/v1"
 	"github.com/Bogan1011/xdr-agent/internal/agent/collector"
+	"github.com/Bogan1011/xdr-agent/internal/agent/ebpf"
 	"github.com/Bogan1011/xdr-agent/internal/agent/procfs"
 )
 
@@ -116,11 +117,34 @@ func (a *Agent) Run(ctx context.Context) error {
 	hasher := procfs.NewHasher(50000)
 	collectors := []collector.Collector{
 		&collector.Process{Hasher: hasher, Log: a.log.With("collector", "process")},
-		&collector.File{
+	}
+	var probes *ebpf.Probes
+	if a.cfg.EBPF != "off" {
+		var err error
+		if probes, err = ebpf.Load(a.log.With("component", "ebpf")); err != nil {
+			a.log.Warn("eBPF unavailable, using inotify and /proc collectors", "err", err)
+		} else {
+			defer probes.Close()
+		}
+	}
+	if probes != nil && probes.Files != nil {
+		collectors = append(collectors, &collector.EBPFFile{
+			Reader: probes.Files, Paths: a.cfg.FilePaths, Exclude: a.cfg.FileExclude,
+			Hasher: hasher, Log: a.log.With("collector", "file-ebpf"),
+		})
+	} else {
+		collectors = append(collectors, &collector.File{
 			Paths: a.cfg.FilePaths, Exclude: a.cfg.FileExclude, MaxWatches: a.cfg.MaxFileWatches,
 			Hasher: hasher, Log: a.log.With("collector", "file"),
-		},
-		&collector.Network{Interval: a.cfg.NetworkInterval},
+		})
+	}
+	if probes != nil && probes.Net != nil {
+		// Connections come from eBPF; /proc polling still reports listeners.
+		collectors = append(collectors,
+			&collector.EBPFNetwork{Reader: probes.Net, Log: a.log.With("collector", "network-ebpf")},
+			&collector.Network{Interval: a.cfg.NetworkInterval, ListenOnly: true})
+	} else {
+		collectors = append(collectors, &collector.Network{Interval: a.cfg.NetworkInterval})
 	}
 
 	var wg sync.WaitGroup

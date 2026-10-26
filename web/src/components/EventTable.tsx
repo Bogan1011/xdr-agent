@@ -8,11 +8,12 @@ function summary(e: XdrEvent): string {
       return e.type === "process_exit" ? `${e.exe} exited (${e.exit_code})` : e.args || e.exe;
     case "file":
       if (e.type === "yara_match") return `${e.path} matched ${e.args}`;
-      return e.type === "file_rename" ? `${e.old_path} → ${e.path}` : e.path;
+      const what = e.type === "file_rename" ? `${e.old_path} → ${e.path}` : e.path;
+      return e.exe ? `${what} by ${e.exe}` : what;
     default:
-      return e.type === "net_listen"
-        ? `${e.exe || "?"} listening on ${e.local_addr}:${e.local_port}`
-        : `${e.exe || "?"} → ${e.remote_addr}:${e.remote_port}`;
+      if (e.type === "net_listen") return `${e.exe || "?"} listening on ${e.local_addr}:${e.local_port}`;
+      if (e.type === "net_accept") return `${e.exe || "?"} ← ${e.remote_addr}:${e.remote_port}`;
+      return `${e.exe || "?"} → ${e.remote_addr}:${e.remote_port}`;
   }
 }
 
@@ -33,6 +34,10 @@ function Detail({ e }: { e: XdrEvent }) {
     rows.push(["Path", e.path]);
     if (e.type === "yara_match") rows.push(["YARA rules", e.args], ["SHA-256", e.sha256]);
     if (e.old_path) rows.push(["Old path", e.old_path]);
+    // Only the eBPF collector knows which process made the change.
+    if (e.pid) {
+      rows.push(["Process", `${e.exe || "unknown"} (pid ${e.pid}, ppid ${e.ppid})`], ["By user", e.user]);
+    }
     // A deleted file can no longer be stat'ed, so it has no size or mode.
     if (e.type !== "file_delete") {
       rows.push(["Size", formatBytes(e.size)], ["Mode", (e.mode & 0o7777).toString(8).padStart(4, "0")], ["Owner uid", e.uid]);

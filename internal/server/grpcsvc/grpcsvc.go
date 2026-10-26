@@ -211,6 +211,7 @@ func toRow(a agentCtx, e *xdrv1.Event) store.Event {
 	case *xdrv1.Event_File:
 		fe := p.File
 		r.Path, r.OldPath, r.Size, r.Mode, r.UID, r.SHA256 = fe.Path, fe.OldPath, fe.Size, fe.Mode, fe.Uid, fe.Sha256
+		r.PID, r.PPID, r.Exe, r.User = fe.Pid, fe.Ppid, fe.Exe, fe.User
 	case *xdrv1.Event_Network:
 		ne := p.Network
 		r.Protocol, r.LocalAddr, r.LocalPort = ne.Protocol, ne.LocalAddr, ne.LocalPort

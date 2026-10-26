@@ -13,6 +13,7 @@ const typeOptions: [string, string][] = [
   ["file_modify", "File modified"],
   ["file_delete", "File deleted"],
   ["net_connect", "Connection"],
+  ["net_accept", "Inbound connection"],
   ["net_listen", "Listening port"],
 ];
 

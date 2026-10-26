@@ -1,7 +1,7 @@
 VERSION ?= 0.1.0
 LDFLAGS := -s -w -X github.com/Bogan1011/xdr-agent/internal/agent.Version=$(VERSION)
 
-.PHONY: all agent server web proto test up down
+.PHONY: all agent server web proto bpf test up down
 
 all: agent server web
 
@@ -18,6 +18,10 @@ web:
 proto:
 	protoc -I proto --go_out=gen --go_opt=paths=source_relative \
 		--go-grpc_out=gen --go-grpc_opt=paths=source_relative proto/xdr/v1/agent.proto
+
+# Rebuilds the committed eBPF objects. Needs clang.
+bpf:
+	cd internal/agent/ebpf && go generate .
 
 test:
 	go vet ./...

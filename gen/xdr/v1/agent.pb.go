@@ -105,6 +105,7 @@ const (
 	EventType_EVENT_TYPE_NET_CONNECT  EventType = 8
 	EventType_EVENT_TYPE_NET_LISTEN   EventType = 9
 	EventType_EVENT_TYPE_YARA_MATCH   EventType = 10
+	EventType_EVENT_TYPE_NET_ACCEPT   EventType = 11
 )
 
 // Enum value maps for EventType.
@@ -121,6 +122,7 @@ var (
 		8:  "EVENT_TYPE_NET_CONNECT",
 		9:  "EVENT_TYPE_NET_LISTEN",
 		10: "EVENT_TYPE_YARA_MATCH",
+		11: "EVENT_TYPE_NET_ACCEPT",
 	}
 	EventType_value = map[string]int32{
 		"EVENT_TYPE_UNSPECIFIED":  0,
@@ -134,6 +136,7 @@ var (
 		"EVENT_TYPE_NET_CONNECT":  8,
 		"EVENT_TYPE_NET_LISTEN":   9,
 		"EVENT_TYPE_YARA_MATCH":   10,
+		"EVENT_TYPE_NET_ACCEPT":   11,
 	}
 )
 
@@ -1187,13 +1190,19 @@ func (x *ProcessEvent) GetExitCode() int32 {
 }
 
 type FileEvent struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	OldPath       string                 `protobuf:"bytes,2,opt,name=old_path,json=oldPath,proto3" json:"old_path,omitempty"`
-	Size          uint64                 `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
-	Mode          uint32                 `protobuf:"varint,4,opt,name=mode,proto3" json:"mode,omitempty"`
-	Uid           uint32                 `protobuf:"varint,5,opt,name=uid,proto3" json:"uid,omitempty"`
-	Sha256        string                 `protobuf:"bytes,6,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Path    string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	OldPath string                 `protobuf:"bytes,2,opt,name=old_path,json=oldPath,proto3" json:"old_path,omitempty"`
+	Size    uint64                 `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
+	Mode    uint32                 `protobuf:"varint,4,opt,name=mode,proto3" json:"mode,omitempty"`
+	Uid     uint32                 `protobuf:"varint,5,opt,name=uid,proto3" json:"uid,omitempty"`
+	Sha256  string                 `protobuf:"bytes,6,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	// The process that made the change. Only the eBPF collector knows it;
+	// inotify events leave these empty.
+	Pid           uint32 `protobuf:"varint,7,opt,name=pid,proto3" json:"pid,omitempty"`
+	Ppid          uint32 `protobuf:"varint,8,opt,name=ppid,proto3" json:"ppid,omitempty"`
+	Exe           string `protobuf:"bytes,9,opt,name=exe,proto3" json:"exe,omitempty"`
+	User          string `protobuf:"bytes,10,opt,name=user,proto3" json:"user,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1266,6 +1275,34 @@ func (x *FileEvent) GetUid() uint32 {
 func (x *FileEvent) GetSha256() string {
 	if x != nil {
 		return x.Sha256
+	}
+	return ""
+}
+
+func (x *FileEvent) GetPid() uint32 {
+	if x != nil {
+		return x.Pid
+	}
+	return 0
+}
+
+func (x *FileEvent) GetPpid() uint32 {
+	if x != nil {
+		return x.Ppid
+	}
+	return 0
+}
+
+func (x *FileEvent) GetExe() string {
+	if x != nil {
+		return x.Exe
+	}
+	return ""
+}
+
+func (x *FileEvent) GetUser() string {
+	if x != nil {
+		return x.User
 	}
 	return ""
 }
@@ -1535,14 +1572,19 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"parent_exe\x18\n" +
 	" \x01(\tR\tparentExe\x12\x1b\n" +
-	"\texit_code\x18\v \x01(\x05R\bexitCode\"\x8c\x01\n" +
+	"\texit_code\x18\v \x01(\x05R\bexitCode\"\xd8\x01\n" +
 	"\tFileEvent\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x19\n" +
 	"\bold_path\x18\x02 \x01(\tR\aoldPath\x12\x12\n" +
 	"\x04size\x18\x03 \x01(\x04R\x04size\x12\x12\n" +
 	"\x04mode\x18\x04 \x01(\rR\x04mode\x12\x10\n" +
 	"\x03uid\x18\x05 \x01(\rR\x03uid\x12\x16\n" +
-	"\x06sha256\x18\x06 \x01(\tR\x06sha256\"\xe0\x01\n" +
+	"\x06sha256\x18\x06 \x01(\tR\x06sha256\x12\x10\n" +
+	"\x03pid\x18\a \x01(\rR\x03pid\x12\x12\n" +
+	"\x04ppid\x18\b \x01(\rR\x04ppid\x12\x10\n" +
+	"\x03exe\x18\t \x01(\tR\x03exe\x12\x12\n" +
+	"\x04user\x18\n" +
+	" \x01(\tR\x04user\"\xe0\x01\n" +
 	"\fNetworkEvent\x12\x1a\n" +
 	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12\x1d\n" +
 	"\n" +
@@ -1570,7 +1612,7 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"\x19COMMAND_TYPE_RESTORE_FILE\x10\x04\x12\x1d\n" +
 	"\x19COMMAND_TYPE_ISOLATE_HOST\x10\x05\x12\x1f\n" +
 	"\x1bCOMMAND_TYPE_UNISOLATE_HOST\x10\x06\x12\x1a\n" +
-	"\x16COMMAND_TYPE_SCAN_PATH\x10\a*\xbf\x02\n" +
+	"\x16COMMAND_TYPE_SCAN_PATH\x10\a*\xda\x02\n" +
 	"\tEventType\x12\x1a\n" +
 	"\x16EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17EVENT_TYPE_PROCESS_EXEC\x10\x01\x12\x1b\n" +
@@ -1583,7 +1625,8 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"\x16EVENT_TYPE_NET_CONNECT\x10\b\x12\x19\n" +
 	"\x15EVENT_TYPE_NET_LISTEN\x10\t\x12\x19\n" +
 	"\x15EVENT_TYPE_YARA_MATCH\x10\n" +
-	"2L\n" +
+	"\x12\x19\n" +
+	"\x15EVENT_TYPE_NET_ACCEPT\x10\v2L\n" +
 	"\x11EnrollmentService\x127\n" +
 	"\x06Enroll\x12\x15.xdr.v1.EnrollRequest\x1a\x16.xdr.v1.EnrollResponse2\xa8\x02\n" +
 	"\fAgentService\x12@\n" +

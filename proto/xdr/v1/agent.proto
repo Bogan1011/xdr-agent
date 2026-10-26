@@ -130,6 +130,7 @@ enum EventType {
   EVENT_TYPE_NET_CONNECT = 8;
   EVENT_TYPE_NET_LISTEN = 9;
   EVENT_TYPE_YARA_MATCH = 10;
+  EVENT_TYPE_NET_ACCEPT = 11;
 }
 
 message Event {
@@ -165,6 +166,12 @@ message FileEvent {
   uint32 mode = 4;
   uint32 uid = 5;
   string sha256 = 6;
+  // The process that made the change. Only the eBPF collector knows it;
+  // inotify events leave these empty.
+  uint32 pid = 7;
+  uint32 ppid = 8;
+  string exe = 9;
+  string user = 10;
 }
 
 message NetworkEvent {
