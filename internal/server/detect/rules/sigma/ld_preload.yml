@@ -1,0 +1,14 @@
+id: lnx-ld-preload
+title: Dynamic linker preload configured
+description: /etc/ld.so.preload changed or a process was started with LD_PRELOAD, used by userland rootkits.
+level: critical
+tags: [attack.persistence, attack.defense_evasion, attack.t1574.006]
+logsource: {product: linux}
+detection:
+  file:
+    type|startswith: file_
+    path: /etc/ld.so.preload
+  proc:
+    type: process_exec
+    cmdline|contains: LD_PRELOAD=
+  condition: file or proc

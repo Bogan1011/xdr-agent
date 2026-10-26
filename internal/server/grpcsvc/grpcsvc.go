@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	xdrv1 "github.com/Bogan1011/xdr-agent/gen/xdr/v1"
+	"github.com/Bogan1011/xdr-agent/internal/server/detect"
 	"github.com/Bogan1011/xdr-agent/internal/server/pki"
 	"github.com/Bogan1011/xdr-agent/internal/server/store"
 )
@@ -62,7 +63,17 @@ type Agents struct {
 	xdrv1.UnimplementedAgentServiceServer
 	DB     *store.Postgres
 	Events *store.ClickHouse
+	Detect *detect.Service
 	Log    *slog.Logger
+}
+
+var commandTypes = map[string]xdrv1.CommandType{
+	"kill_process":    xdrv1.CommandType_COMMAND_TYPE_KILL_PROCESS,
+	"quarantine_file": xdrv1.CommandType_COMMAND_TYPE_QUARANTINE_FILE,
+	"restore_file":    xdrv1.CommandType_COMMAND_TYPE_RESTORE_FILE,
+	"isolate_host":    xdrv1.CommandType_COMMAND_TYPE_ISOLATE_HOST,
+	"unisolate_host":  xdrv1.CommandType_COMMAND_TYPE_UNISOLATE_HOST,
+	"scan_path":       xdrv1.CommandType_COMMAND_TYPE_SCAN_PATH,
 }
 
 type ctxKey struct{}
@@ -105,7 +116,18 @@ func (s *Agents) Heartbeat(ctx context.Context, req *xdrv1.HeartbeatRequest) (*x
 			return nil, status.Error(codes.Unavailable, "store unavailable")
 		}
 	}
+	if err := s.DB.SetAgentState(ctx, a.id, req.Isolated, req.ContentVersion); err != nil {
+		s.Log.Warn("agent state update", "agent_id", a.id, "err", err)
+	}
 	resp := &xdrv1.HeartbeatResponse{ServerTimeUnix: time.Now().Unix()}
+	resp.ContentVersion, _ = s.Detect.Content()
+	cmds, err := s.DB.TakeCommands(ctx, a.id)
+	if err != nil {
+		s.Log.Error("take response commands", "agent_id", a.id, "err", err)
+	}
+	for _, c := range cmds {
+		resp.Commands = append(resp.Commands, &xdrv1.AgentCommand{Id: c.ID, Type: commandTypes[c.Type], Args: c.Args})
+	}
 	cmd, err := s.DB.TakeCommand(ctx, a.id)
 	if err != nil {
 		s.Log.Error("take command", "agent_id", a.id, "err", err)
@@ -131,7 +153,35 @@ func (s *Agents) SendEvents(ctx context.Context, req *xdrv1.EventBatch) (*xdrv1.
 		return nil, status.Error(codes.Unavailable, "event store unavailable")
 	}
 	_ = s.DB.Touch(ctx, a.id)
+	s.Detect.Process(ctx, rows)
 	return &xdrv1.SendEventsResponse{Accepted: uint64(len(rows))}, nil
+}
+
+func (s *Agents) GetDetectionContent(ctx context.Context, _ *xdrv1.DetectionContentRequest) (*xdrv1.DetectionContent, error) {
+	v, src := s.Detect.Content()
+	return &xdrv1.DetectionContent{Version: v, YaraRules: src}, nil
+}
+
+func (s *Agents) ReportCommandResult(ctx context.Context, req *xdrv1.CommandResult) (*xdrv1.CommandResultAck, error) {
+	a := fromCtx(ctx)
+	c, err := s.DB.FinishCommand(ctx, a.id, req.CommandId, req.Success, truncate(req.Message, 4000))
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, status.Error(codes.NotFound, "unknown command")
+	}
+	if err != nil {
+		s.Log.Error("finish command", "agent_id", a.id, "err", err)
+		return nil, status.Error(codes.Unavailable, "store unavailable")
+	}
+	s.Log.Info("response command finished", "command_id", c.ID, "type", c.Type, "hostname", a.hostname,
+		"success", req.Success, "message", c.Message)
+	return &xdrv1.CommandResultAck{}, nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
 }
 
 // EventTypeName is the stored name of an event type, e.g. "process_exec".
@@ -165,6 +215,11 @@ func toRow(a agentCtx, e *xdrv1.Event) store.Event {
 		ne := p.Network
 		r.Protocol, r.LocalAddr, r.LocalPort = ne.Protocol, ne.LocalAddr, ne.LocalPort
 		r.RemoteAddr, r.RemotePort, r.PID, r.Exe, r.UID = ne.RemoteAddr, ne.RemotePort, ne.Pid, ne.Exe, ne.Uid
+	case *xdrv1.Event_Yara:
+		y := p.Yara
+		r.Path, r.SHA256, r.Size, r.PID = y.Path, y.Sha256, y.Size, y.Pid
+		// The matched rule names are kept in args.
+		r.Args = strings.Join(y.Rules, ", ")
 	}
 	return r
 }

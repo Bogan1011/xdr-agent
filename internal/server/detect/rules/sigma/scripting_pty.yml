@@ -1,0 +1,12 @@
+id: lnx-interpreter-shell-spawn
+title: Interpreter spawning an interactive shell
+description: Python, Perl, Ruby, PHP or Lua used to spawn a PTY or reverse shell, a common post-exploitation step.
+level: high
+tags: [attack.execution, attack.t1059.006]
+logsource: {product: linux, category: process_creation}
+detection:
+  interp:
+    exe|re: '/(python[0-9.]*|perl|ruby|php[0-9.]*|lua[0-9.]*)$'
+  payload:
+    cmdline|contains: [pty.spawn, socket.socket, 'fsockopen(', 'TCPSocket.new', 'IO::Socket::INET', 'os.dup2']
+  condition: interp and payload

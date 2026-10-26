@@ -1,0 +1,15 @@
+id: lnx-netcat-exec
+title: Netcat or socat spawning a shell
+description: nc/ncat/socat executed with options that bind a shell to a network connection.
+level: high
+tags: [attack.execution, attack.t1059, attack.command_and_control]
+logsource: {product: linux, category: process_creation}
+detection:
+  nc:
+    exe|endswith: [/nc, /ncat, /netcat, /nc.traditional, /nc.openbsd]
+  nc_exec:
+    cmdline|contains: [' -e ', ' -c ', '--exec', '--sh-exec']
+  socat:
+    exe|endswith: /socat
+    cmdline|contains: [exec:, system:]
+  condition: (nc and nc_exec) or socat

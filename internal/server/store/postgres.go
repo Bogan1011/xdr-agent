@@ -87,7 +87,10 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
 	finished_at TIMESTAMPTZ
 );
 `)
-	return err
+	if err != nil {
+		return err
+	}
+	return p.migrateDetection(ctx)
 }
 
 type Agent struct {
@@ -112,17 +115,20 @@ type Agent struct {
 	PendingCommand string    `json:"pending_command"`
 	UninstalledAt  time.Time `json:"uninstalled_at"`
 	Online         bool      `json:"online"`
+	// Isolated is the network isolation state the agent last reported.
+	Isolated       bool   `json:"isolated"`
+	ContentVersion string `json:"content_version"`
 }
 
 const agentCols = `id, hostname, os, os_version, kernel, arch, ip_addresses, agent_version, machine_id,
 	COALESCE(cert_expires, 'epoch'), enrolled_at, COALESCE(last_seen, 'epoch'), events_sent, events_dropped,
-	cpu_percent, rss_bytes, revoked, pending_command, COALESCE(uninstalled_at, 'epoch')`
+	cpu_percent, rss_bytes, revoked, pending_command, COALESCE(uninstalled_at, 'epoch'), isolated, content_version`
 
 func scanAgent(row pgx.Row) (*Agent, error) {
 	a := &Agent{}
 	err := row.Scan(&a.ID, &a.Hostname, &a.OS, &a.OSVersion, &a.Kernel, &a.Arch, &a.IPAddresses, &a.AgentVersion,
 		&a.MachineID, &a.CertExpires, &a.EnrolledAt, &a.LastSeen, &a.EventsSent, &a.EventsDropped,
-		&a.CPUPercent, &a.RSSBytes, &a.Revoked, &a.PendingCommand, &a.UninstalledAt)
+		&a.CPUPercent, &a.RSSBytes, &a.Revoked, &a.PendingCommand, &a.UninstalledAt, &a.Isolated, &a.ContentVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}

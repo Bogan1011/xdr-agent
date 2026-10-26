@@ -17,6 +17,11 @@ service AgentService {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
   // Unary per batch so every batch is acknowledged and can be retried.
   rpc SendEvents(EventBatch) returns (SendEventsResponse);
+  // Detection content (YARA rules) the agent evaluates locally. Fetched when
+  // the heartbeat reports a version different from the agent's.
+  rpc GetDetectionContent(DetectionContentRequest) returns (DetectionContent);
+  // Outcome of a response command delivered through the heartbeat.
+  rpc ReportCommandResult(CommandResult) returns (CommandResultAck);
 }
 
 message HostInfo {
@@ -45,6 +50,9 @@ message EnrollResponse {
 message HeartbeatRequest {
   HostInfo host = 1;
   AgentStats stats = 2;
+  // True while the host's network is isolated by the agent.
+  bool isolated = 3;
+  string content_version = 4;
 }
 
 message AgentStats {
@@ -59,17 +67,47 @@ message HeartbeatResponse {
   int64 server_time_unix = 1;
   // Commands for the agent to run, delivered once.
   repeated AgentCommand commands = 2;
+  // Version of the current detection content; empty when there is none.
+  string content_version = 3;
 }
 
 enum CommandType {
   COMMAND_TYPE_UNSPECIFIED = 0;
   // Remove the agent, its config and its identity from the host.
   COMMAND_TYPE_UNINSTALL = 1;
+  // args: pid, exe (optional, must match /proc/<pid>/exe).
+  COMMAND_TYPE_KILL_PROCESS = 2;
+  // args: path. The result message is the quarantine id.
+  COMMAND_TYPE_QUARANTINE_FILE = 3;
+  // args: quarantine_id.
+  COMMAND_TYPE_RESTORE_FILE = 4;
+  // args: allow (comma separated IPs or CIDRs reachable besides the console).
+  COMMAND_TYPE_ISOLATE_HOST = 5;
+  COMMAND_TYPE_UNISOLATE_HOST = 6;
+  // args: path (file or directory) to scan with the YARA rules.
+  COMMAND_TYPE_SCAN_PATH = 7;
 }
 
 message AgentCommand {
   string id = 1;
   CommandType type = 2;
+  map<string, string> args = 3;
+}
+
+message CommandResult {
+  string command_id = 1;
+  bool success = 2;
+  string message = 3;
+}
+
+message CommandResultAck {}
+
+message DetectionContentRequest {}
+
+message DetectionContent {
+  string version = 1;
+  // YARA source of every enabled rule, concatenated.
+  string yara_rules = 2;
 }
 
 message EventBatch {
@@ -91,6 +129,7 @@ enum EventType {
   EVENT_TYPE_FILE_ATTRIB = 7;
   EVENT_TYPE_NET_CONNECT = 8;
   EVENT_TYPE_NET_LISTEN = 9;
+  EVENT_TYPE_YARA_MATCH = 10;
 }
 
 message Event {
@@ -101,6 +140,7 @@ message Event {
     ProcessEvent process = 10;
     FileEvent file = 11;
     NetworkEvent network = 12;
+    YaraMatch yara = 13;
   }
 }
 
@@ -136,4 +176,13 @@ message NetworkEvent {
   uint32 pid = 6;
   string exe = 7;
   uint32 uid = 8;
+}
+
+message YaraMatch {
+  string path = 1;
+  string sha256 = 2;
+  repeated string rules = 3;
+  // The process whose binary matched, when the scan came from an exec.
+  uint32 pid = 4;
+  uint64 size = 5;
 }

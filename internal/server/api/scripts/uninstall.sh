@@ -8,6 +8,7 @@ set -euo pipefail
 
 if systemctl list-unit-files xdr-agent.service >/dev/null 2>&1; then
   systemctl disable --now xdr-agent 2>/dev/null || true
+  nft delete table inet xdr_isolation 2>/dev/null || true
 fi
 rm -f /etc/systemd/system/xdr-agent.service
 systemctl daemon-reload

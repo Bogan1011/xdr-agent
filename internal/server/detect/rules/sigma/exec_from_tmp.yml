@@ -1,0 +1,10 @@
+id: lnx-exec-from-tmp
+title: Execution from a temporary directory
+description: A binary was executed from /tmp, /var/tmp or /dev/shm, where malware is commonly dropped.
+level: medium
+tags: [attack.execution, attack.t1204, attack.defense_evasion]
+logsource: {product: linux, category: process_creation}
+detection:
+  selection:
+    exe|startswith: [/tmp/, /var/tmp/, /dev/shm/]
+  condition: selection

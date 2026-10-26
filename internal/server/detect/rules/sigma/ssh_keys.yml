@@ -1,0 +1,10 @@
+id: lnx-ssh-authorized-keys
+title: SSH authorized_keys modified
+description: An authorized_keys file changed, which can grant an attacker persistent SSH access.
+level: high
+tags: [attack.persistence, attack.t1098.004]
+logsource: {product: linux, category: file_event}
+detection:
+  selection:
+    path|endswith: [/.ssh/authorized_keys, /.ssh/authorized_keys2]
+  condition: selection

@@ -1,0 +1,12 @@
+id: lnx-setuid-bit
+title: Setuid bit set on a file
+description: chmod used to make a file setuid or setgid, a way to keep root access.
+level: medium
+tags: [attack.privilege_escalation, attack.t1548.001]
+logsource: {product: linux, category: process_creation}
+detection:
+  chmod:
+    exe|endswith: /chmod
+  bits:
+    cmdline|re: '\s(u\+s|g\+s|\+s|[2467][0-7]{3})\s'
+  condition: chmod and bits

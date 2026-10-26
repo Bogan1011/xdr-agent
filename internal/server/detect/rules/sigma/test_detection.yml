@@ -1,0 +1,10 @@
+id: xdr-test-detection
+title: XDR test detection
+description: Fires on any command line containing xdr-test-detection. Use it to check that detection and alerting work end to end.
+level: low
+tags: [test]
+logsource: {product: linux, category: process_creation}
+detection:
+  selection:
+    cmdline|contains: xdr-test-detection
+  condition: selection

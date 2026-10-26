@@ -1,0 +1,12 @@
+id: lnx-crypto-miner
+title: Cryptocurrency miner
+description: Known miner binaries or mining pool protocols on the command line.
+level: high
+tags: [attack.impact, attack.t1496]
+logsource: {product: linux, category: process_creation}
+detection:
+  exe:
+    exe|endswith: [/xmrig, /xmr-stak, /minerd, /cpuminer, /ethminer, /nbminer]
+  args:
+    cmdline|contains: ['stratum+tcp://', 'stratum+ssl://', '--donate-level', 'cryptonight', 'randomx']
+  condition: exe or args

@@ -1,0 +1,14 @@
+id: lnx-download-pipe-shell
+title: Download piped into a shell
+description: curl or wget output piped straight into sh/bash, typical of droppers and installers of unknown origin.
+level: high
+tags: [attack.execution, attack.t1059.004, attack.t1105]
+logsource: {product: linux, category: process_creation}
+detection:
+  shell:
+    exe|endswith: [/sh, /bash, /dash, /zsh]
+  dl:
+    cmdline|contains: [curl, wget]
+  pipe:
+    cmdline|re: '\|\s*(sudo\s+)?(ba|da|z)?sh\b'
+  condition: shell and dl and pipe

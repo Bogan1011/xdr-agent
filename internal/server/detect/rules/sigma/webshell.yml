@@ -1,0 +1,12 @@
+id: lnx-webserver-shell
+title: Web server spawning a shell
+description: A web server or application runtime started a shell, a typical sign of a web shell or RCE.
+level: high
+tags: [attack.persistence, attack.t1505.003, attack.initial_access, attack.t1190]
+logsource: {product: linux, category: process_creation}
+detection:
+  parent:
+    parent_exe|re: '/(nginx|apache2|httpd|php-fpm[0-9.]*|lighttpd|tomcat[0-9]*|caddy)$'
+  child:
+    exe|endswith: [/sh, /bash, /dash, /zsh, /python, /python3, /perl, /nc, /ncat]
+  condition: parent and child

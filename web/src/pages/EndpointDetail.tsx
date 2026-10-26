@@ -5,6 +5,8 @@ import { usePoll } from "../hooks";
 import EventTable from "../components/EventTable";
 import Timeline from "../components/Timeline";
 import { StatusBadge, isSet } from "./Endpoints";
+import { CommandList, EndpointResponse } from "../components/Response";
+import { AlertTable } from "./Alerts";
 
 export default function EndpointDetail() {
   const { id = "" } = useParams();
@@ -13,6 +15,8 @@ export default function EndpointDetail() {
   const stats = usePoll(() => api.stats(id), 30000, [id]);
   const [type, setType] = useState("");
   const events = usePoll(() => api.events({ agent_id: id, type, limit: 100 }), 10000, [id, type]);
+  const alerts = usePoll(() => api.alerts({ agent_id: id, limit: 50 }), 15000, [id]);
+  const commands = usePoll(() => api.commands(id), 5000, [id]);
 
   const a = agent.data;
   if (agent.error) return <div className="error">{agent.error}</div>;
@@ -50,7 +54,7 @@ export default function EndpointDetail() {
 
       <section className="card">
         <dl className="facts">
-          <div><dt>Status</dt><dd><StatusBadge online={a.online} revoked={a.revoked} uninstalled={isSet(a.uninstalled_at)} uninstalling={a.pending_command === "uninstall"} /></dd></div>
+          <div><dt>Status</dt><dd><StatusBadge online={a.online} revoked={a.revoked} uninstalled={isSet(a.uninstalled_at)} uninstalling={a.pending_command === "uninstall"} />{a.isolated && <span className="status status-critical"> · Network isolated</span>}</dd></div>
           <div><dt>Last seen</dt><dd>{timeAgo(a.last_seen)}</dd></div>
           <div><dt>OS</dt><dd>{a.os_version}</dd></div>
           <div><dt>Kernel</dt><dd className="mono">{a.kernel} ({a.arch})</dd></div>
@@ -60,9 +64,32 @@ export default function EndpointDetail() {
           <div><dt>Events sent / dropped</dt><dd>{a.events_sent.toLocaleString()} / {a.events_dropped.toLocaleString()}</dd></div>
           <div><dt>Enrolled</dt><dd>{new Date(a.enrolled_at).toLocaleString()}</dd></div>
           <div><dt>Certificate expires</dt><dd>{new Date(a.cert_expires).toLocaleDateString()}</dd></div>
+          <div><dt>YARA rules version</dt><dd className="mono">{a.content_version || "none"}</dd></div>
           <div className="wide"><dt>Agent ID</dt><dd className="mono">{a.id}</dd></div>
         </dl>
       </section>
+
+      <section className="card">
+        <h2>Open alerts</h2>
+        {alerts.data && <AlertTable alerts={alerts.data} showHost={false} onSelect={(aid) => nav(`/alerts?id=${aid}`)} />}
+      </section>
+
+      {!a.revoked && (
+        <section className="card">
+          <h2>Response</h2>
+          <EndpointResponse
+            agentId={id}
+            hostname={a.hostname}
+            isolated={a.isolated}
+            onSent={() => {
+              commands.refresh();
+              agent.refresh();
+            }}
+          />
+          <h3>Action history</h3>
+          {commands.data && <CommandList commands={commands.data} onChange={commands.refresh} />}
+        </section>
+      )}
 
       <section className="card">
         <h2>Event volume</h2>

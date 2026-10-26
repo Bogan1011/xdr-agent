@@ -22,7 +22,8 @@ import (
 	"github.com/Bogan1011/xdr-agent/internal/agent/procfs"
 )
 
-const heartbeatInterval = 30 * time.Second
+// heartbeatInterval also bounds how long a response action waits for delivery.
+const heartbeatInterval = 15 * time.Second
 
 type Agent struct {
 	cfg   *Config
@@ -32,6 +33,10 @@ type Agent struct {
 
 	sent    atomic.Uint64
 	dropped atomic.Uint64
+
+	client  xdrv1.AgentServiceClient
+	scanner *Scanner
+	wake    chan struct{}
 }
 
 func New(cfg *Config, log *slog.Logger) *Agent {
@@ -40,12 +45,28 @@ func New(cfg *Config, log *slog.Logger) *Agent {
 		log:   log,
 		queue: make(chan *xdrv1.Event, cfg.QueueSize),
 		start: time.Now(),
+		wake:  make(chan struct{}, 1),
+	}
+}
+
+// wakeHeartbeat sends a heartbeat now, so state changes show up quickly.
+func (a *Agent) wakeHeartbeat() {
+	select {
+	case a.wake <- struct{}{}:
+	default:
 	}
 }
 
 // emit never blocks a collector: when the backend is unreachable and the
 // queue is full, new events are dropped and counted.
 func (a *Agent) emit(e *xdrv1.Event) {
+	if a.scanner != nil {
+		a.scanner.Observe(e)
+	}
+	a.send(e)
+}
+
+func (a *Agent) send(e *xdrv1.Event) {
 	select {
 	case a.queue <- e:
 	default:
@@ -87,6 +108,10 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 	defer conn.Close()
 	client := xdrv1.NewAgentServiceClient(conn)
+	a.client = client
+	a.restoreIsolation()
+	a.scanner = NewScanner(a.log.With("component", "yara"), a.send, a.cfg.ScanMaxBytes,
+		append([]string{a.cfg.StateDir}, a.cfg.FileExclude...))
 
 	hasher := procfs.NewHasher(50000)
 	collectors := []collector.Collector{
@@ -106,7 +131,8 @@ func (a *Agent) Run(ctx context.Context) error {
 			a.runCollector(ctx, c)
 		}(c)
 	}
-	wg.Add(2)
+	wg.Add(3)
+	go func() { defer wg.Done(); a.scanner.Run(ctx) }()
 	go func() { defer wg.Done(); a.sendLoop(ctx, client) }()
 	go func() { defer wg.Done(); a.heartbeatLoop(ctx, client, host) }()
 	wg.Wait()
@@ -177,20 +203,39 @@ func (a *Agent) heartbeatLoop(ctx context.Context, client xdrv1.AgentServiceClie
 	defer t.Stop()
 	for {
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		resp, err := client.Heartbeat(cctx, &xdrv1.HeartbeatRequest{Host: host, Stats: a.stats()})
+		resp, err := client.Heartbeat(cctx, &xdrv1.HeartbeatRequest{
+			Host: host, Stats: a.stats(), Isolated: a.Isolated(), ContentVersion: a.scanner.Version(),
+		})
 		cancel()
 		if err != nil && ctx.Err() == nil {
 			a.log.Warn("heartbeat failed", "err", err)
 		}
+		if err == nil && resp.ContentVersion != a.scanner.Version() {
+			a.updateContent(ctx, client)
+		}
 		for _, c := range resp.GetCommands() {
-			a.runCommand(c)
+			a.runCommand(ctx, c)
 		}
 		select {
 		case <-ctx.Done():
 			return
+		case <-a.wake:
 		case <-t.C:
 			host = HostInfo()
 		}
+	}
+}
+
+func (a *Agent) updateContent(ctx context.Context, client xdrv1.AgentServiceClient) {
+	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	c, err := client.GetDetectionContent(cctx, &xdrv1.DetectionContentRequest{})
+	if err != nil {
+		a.log.Warn("fetching detection content failed", "err", err)
+		return
+	}
+	if err := a.scanner.Update(c.Version, c.YaraRules); err != nil {
+		a.log.Error("YARA rules from the console do not compile, keeping the current ones", "err", err)
 	}
 }
 
