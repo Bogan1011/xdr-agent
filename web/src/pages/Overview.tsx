@@ -1,13 +1,18 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, categoryOf } from "../api";
 import { usePoll } from "../hooks";
 import Timeline from "../components/Timeline";
 import EventTable from "../components/EventTable";
+import { AlertTable } from "./Alerts";
 
 export default function Overview() {
   const agents = usePoll(api.agents, 15000);
   const stats = usePoll(() => api.stats(), 30000);
   const recent = usePoll(() => api.events({ type: "process_exec", limit: 15 }), 10000);
+  const summary = usePoll(api.alertSummary, 15000);
+  const openAlerts = usePoll(() => api.alerts({ limit: 8 }), 15000);
+  const nav = useNavigate();
+  const sev = summary.data?.by_severity ?? {};
 
   const total = agents.data?.length ?? 0;
   const online = agents.data?.filter((a) => a.online).length ?? 0;
@@ -46,11 +51,23 @@ export default function Overview() {
             {(stats.data?.by_type.find((t) => t.type === "process_exec")?.count ?? 0).toLocaleString()}
           </div>
         </div>
-        <div className="tile">
-          <div className="tile-label">Alerts</div>
-          <div className="tile-value">0</div>
-          <div className="tile-note muted">Detection engine arrives in step 2</div>
+        <Link to="/alerts" className="tile tile-link">
+          <div className="tile-label">Open alerts</div>
+          <div className="tile-value">{summary.data?.open ?? 0}</div>
+          <div className="tile-note">
+            {(sev.critical ?? 0) > 0 && <span className="sev sev-critical">{sev.critical} critical</span>}{" "}
+            {(sev.high ?? 0) > 0 && <span className="sev sev-high">{sev.high} high</span>}{" "}
+            <span className="muted">{summary.data?.last_24h ?? 0} new in 24h</span>
+          </div>
+        </Link>
+      </section>
+
+      <section className="card">
+        <div className="card-head">
+          <h2>Open alerts</h2>
+          <Link to="/alerts">All alerts →</Link>
         </div>
+        {openAlerts.data && <AlertTable alerts={openAlerts.data} onSelect={(id) => nav(`/alerts?id=${id}`)} />}
       </section>
 
       <section className="card">

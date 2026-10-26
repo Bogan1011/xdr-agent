@@ -16,7 +16,35 @@ service on the host.
 | Network telemetry | New outbound TCP connections and listening ports, attributed to the owning process |
 | Agent security | One-time enrollment tokens, a private CA, mutual TLS for all telemetry, per-agent revocation |
 | Console | Overview, endpoint inventory and health, per-endpoint activity, event search, agent deployment |
-| Install / uninstall | One-line installer with CA pinning and checksum verification; one-line uninstaller |
+| Install / uninstall | One-line installer with CA pinning and checksum verification; one-line uninstaller; remote install over SSH |
+| Detection | Sigma-style behaviour rules (20 built-in for Linux, custom rules in the console), YARA scanning on the agent, IOC lists and feeds (SHA-256, IP/CIDR, domain) |
+| Alerts | Deduplicated alerts with severity, MITRE ATT&CK tags, triage status and the triggering event |
+| Response | Kill process, quarantine and restore file, isolate and un-isolate host, on-demand YARA scan; optional automatic response per rule |
+
+## Detection and response
+
+* **Sigma rules** run on the console against every event. They use Sigma's
+  layout (`logsource`, named selections, `field|modifier: value`, a
+  `condition`), with the fields and categories listed in the rule editor.
+  Add `response: [kill_process]` (or `quarantine_file`, `isolate_host`) to
+  act automatically when a rule fires. The built-in rules live in
+  `internal/server/detect/rules/`.
+* **YARA rules** are sent to agents within one heartbeat of being saved. The
+  agent scans files when they are written and the binary of every new
+  process, up to 32 MB (`scan_max_bytes` in `agent.yaml`). The engine is a
+  pure-Go subset of YARA so the agent stays a static binary: modules and
+  `for` loops are not supported.
+* **IOCs** are matched on ingest: hashes against executed and written files,
+  IPs against outbound connections, domains against command lines (there is
+  no DNS telemetry yet). Feeds are plain-text or CSV URLs refreshed every 6
+  hours.
+* **Response actions** are queued in the console and delivered on the
+  agent's next heartbeat (every 15 seconds); results show on the endpoint
+  and alert pages. Quarantined files are moved to
+  `/var/lib/xdr-agent/quarantine/` with no permissions. Isolation uses an
+  nftables table (`inet xdr_isolation`, needs the `nft` command) that drops
+  everything except loopback, DHCP and the console, plus any addresses given
+  when isolating; it survives agent restarts and reboots.
 
 ## Architecture
 
@@ -95,7 +123,7 @@ Run the server locally against Postgres and ClickHouse with the
 `XDR_*` variables listed in `deploy/docker-compose.yml`, and the dashboard
 with `cd web && npm run dev` (it proxies `/api` to `:8080`).
 
-## Known limits of step 1
+## Known limits
 
 * The console is served over plain HTTP. The installer pins the CA by the
   fingerprint shown in the console, so agent traffic is still protected, but
@@ -105,13 +133,16 @@ with `cd web && npm run dev` (it proxies `/api` to `:8080`).
 * inotify cannot tell which process changed a file, and network polling
   every 5 seconds can miss very short connections. Both are fixed by the
   eBPF collectors planned below.
+* Isolating the host that runs the console does not cut it off: the
+  console's own address must stay reachable, and on that host it is the
+  host itself. Test isolation on a second machine.
 
 ## Roadmap
 
-1. **Foundation** (this release): telemetry, console, enrollment, installer.
-2. **Detection and response**: Sigma-style rules, YARA scanning, IOC feeds,
-   alerts, and response actions (kill process, quarantine file, isolate host).
-   eBPF collectors for process-attributed file and network events.
+1. **Foundation** (done): telemetry, console, enrollment, installer.
+2. **Detection and response** (this release): Sigma-style rules, YARA
+   scanning, IOC feeds, alerts, and response actions. Next: eBPF collectors
+   for process-attributed file and network events.
 3. **Fleet management**: remote install and uninstall from the console over
    SSH, agent self-update, tamper protection; roll out to all VMs.
 4. **PAM**: just-in-time sudo elevation with approval, session recording,

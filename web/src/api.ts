@@ -19,6 +19,91 @@ export interface Agent {
   online: boolean;
   pending_command: string;
   uninstalled_at: string;
+  isolated: boolean;
+  content_version: string;
+}
+
+export type Severity = "low" | "medium" | "high" | "critical";
+export type AlertStatus = "new" | "in_progress" | "resolved" | "false_positive";
+
+export interface Alert {
+  id: number;
+  agent_id: string;
+  hostname: string;
+  rule_id: string;
+  rule_name: string;
+  kind: "sigma" | "ioc" | "yara";
+  severity: Severity;
+  tags: string[];
+  detail: string;
+  status: AlertStatus;
+  count: number;
+  event: XdrEvent;
+  note: string;
+  first_seen: string;
+  last_seen: string;
+}
+
+export interface AlertSummary {
+  open: number;
+  by_severity: Partial<Record<Severity, number>>;
+  last_24h: number;
+}
+
+export type CommandType =
+  | "kill_process"
+  | "quarantine_file"
+  | "restore_file"
+  | "isolate_host"
+  | "unisolate_host"
+  | "scan_path";
+
+export interface Command {
+  id: string;
+  agent_id: string;
+  type: CommandType;
+  args: Record<string, string>;
+  alert_id: number;
+  requested_by: string;
+  status: "pending" | "sent" | "succeeded" | "failed";
+  message: string;
+  created_at: string;
+  finished_at: string;
+}
+
+export interface Rule {
+  id: string;
+  kind: "sigma" | "yara";
+  name: string;
+  description: string;
+  severity: Severity;
+  enabled: boolean;
+  builtin: boolean;
+  source: string;
+  updated_at: string;
+}
+
+export interface IOC {
+  id: number;
+  type: "sha256" | "ip" | "domain";
+  value: string;
+  feed_id: number;
+  source: string;
+  description: string;
+  severity: Severity;
+  created_at: string;
+}
+
+export interface Feed {
+  id: number;
+  name: string;
+  url: string;
+  type: IOC["type"];
+  severity: Severity;
+  enabled: boolean;
+  last_fetched: string;
+  last_error: string;
+  ioc_count: number;
 }
 
 export interface DeployJob {
@@ -157,13 +242,62 @@ export const api = {
     request<EnrollmentToken>("POST", "/api/v1/enrollment-tokens", { description, ttl_hours, max_uses }),
   revokeToken: (id: number) => request<void>("DELETE", `/api/v1/enrollment-tokens/${id}`),
   installInfo: () => request<InstallInfo>("GET", "/api/v1/install-info"),
+
+  alerts: (f: { agent_id?: string; status?: string; severity?: string; limit?: number }) => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(f)) if (v !== undefined && v !== "") p.set(k, String(v));
+    return request<Alert[]>("GET", `/api/v1/alerts?${p}`);
+  },
+  alertSummary: () => request<AlertSummary>("GET", "/api/v1/alerts/summary"),
+  alert: (id: number) => request<{ alert: Alert; commands: Command[] }>("GET", `/api/v1/alerts/${id}`),
+  updateAlert: (id: number, status: AlertStatus, note = "") =>
+    request<void>("PATCH", `/api/v1/alerts/${id}`, { status, note }),
+  commands: (agentId: string) => request<Command[]>("GET", `/api/v1/agents/${encodeURIComponent(agentId)}/commands`),
+  sendCommand: (agentId: string, type: CommandType, args: Record<string, string> = {}, alert_id = 0) =>
+    request<Command>("POST", `/api/v1/agents/${encodeURIComponent(agentId)}/commands`, { type, args, alert_id }),
+  rules: () => request<{ rules: Rule[]; fields: string[]; responses: string[] }>("GET", "/api/v1/rules"),
+  saveRule: (kind: Rule["kind"], source: string, severity = "", id = "") =>
+    request<Rule>(id ? "PUT" : "POST", id ? `/api/v1/rules/${encodeURIComponent(id)}` : "/api/v1/rules", {
+      kind,
+      source,
+      severity,
+    }),
+  setRuleEnabled: (id: string, enabled: boolean) =>
+    request<void>("POST", `/api/v1/rules/${encodeURIComponent(id)}/enabled`, { enabled }),
+  deleteRule: (id: string) => request<void>("DELETE", `/api/v1/rules/${encodeURIComponent(id)}`),
+  iocs: (q = "") => request<IOC[]>("GET", `/api/v1/iocs${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  addIOCs: (type: IOC["type"], values: string, description: string, severity: Severity) =>
+    request<{ added: number; duplicates: number }>("POST", "/api/v1/iocs", { type, values, description, severity }),
+  deleteIOC: (id: number) => request<void>("DELETE", `/api/v1/iocs/${id}`),
+  feeds: () => request<Feed[]>("GET", "/api/v1/ioc-feeds"),
+  createFeed: (f: { name: string; url: string; type: IOC["type"]; severity: Severity }) =>
+    request<Feed>("POST", "/api/v1/ioc-feeds", f),
+  refreshFeed: (id: number) => request<void>("POST", `/api/v1/ioc-feeds/${id}/refresh`, {}),
+  setFeedEnabled: (id: number, enabled: boolean) => request<void>("POST", `/api/v1/ioc-feeds/${id}/enabled`, { enabled }),
+  deleteFeed: (id: number) => request<void>("DELETE", `/api/v1/ioc-feeds/${id}`),
+};
+
+export const commandLabels: Record<CommandType, string> = {
+  kill_process: "Kill process",
+  quarantine_file: "Quarantine file",
+  restore_file: "Restore file",
+  isolate_host: "Isolate host",
+  unisolate_host: "End isolation",
+  scan_path: "YARA scan",
+};
+
+export const statusLabels: Record<AlertStatus, string> = {
+  new: "New",
+  in_progress: "In progress",
+  resolved: "Resolved",
+  false_positive: "False positive",
 };
 
 export type Category = "process" | "file" | "network";
 
 export function categoryOf(type: string): Category {
   if (type.startsWith("process")) return "process";
-  if (type.startsWith("file")) return "file";
+  if (type.startsWith("file") || type === "yara_match") return "file";
   return "network";
 }
 
@@ -177,6 +311,7 @@ export const typeLabels: Record<string, string> = {
   file_attrib: "File permissions",
   net_connect: "Connection",
   net_listen: "Listening port",
+  yara_match: "YARA match",
 };
 
 export function timeAgo(iso: string): string {

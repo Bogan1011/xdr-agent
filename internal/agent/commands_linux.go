@@ -13,6 +13,7 @@ import (
 // uninstallScript mirrors the console's uninstall.sh. It runs outside the
 // agent's own service so that stopping the service does not kill it.
 const uninstallScript = `sleep 2
+nft delete table inet xdr_isolation 2>/dev/null || true
 systemctl disable --now xdr-agent 2>/dev/null || true
 rm -f /etc/systemd/system/xdr-agent.service
 systemctl daemon-reload

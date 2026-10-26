@@ -7,6 +7,9 @@ import Endpoints from "./pages/Endpoints";
 import EndpointDetail from "./pages/EndpointDetail";
 import Events from "./pages/Events";
 import Deploy from "./pages/Deploy";
+import Alerts from "./pages/Alerts";
+import Rules from "./pages/Rules";
+import IOCs from "./pages/IOCs";
 
 export default function App() {
   const [user, setUser] = useState<string | null | undefined>(undefined);
@@ -29,8 +32,11 @@ export default function App() {
         </div>
         <nav>
           <NavLink to="/" end>Overview</NavLink>
+          <NavLink to="/alerts">Alerts</NavLink>
           <NavLink to="/endpoints">Endpoints</NavLink>
           <NavLink to="/events">Event search</NavLink>
+          <NavLink to="/rules">Detection rules</NavLink>
+          <NavLink to="/iocs">Threat intel</NavLink>
           <NavLink to="/deploy">Deploy agents</NavLink>
         </nav>
         <div className="sidebar-foot">
@@ -50,6 +56,9 @@ export default function App() {
           <Route path="/endpoints/:id" element={<EndpointDetail />} />
           <Route path="/events" element={<Events />} />
           <Route path="/deploy" element={<Deploy />} />
+          <Route path="/alerts" element={<Alerts />} />
+          <Route path="/rules" element={<Rules />} />
+          <Route path="/iocs" element={<IOCs />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
