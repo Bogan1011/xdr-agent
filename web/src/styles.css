@@ -249,3 +249,6 @@ textarea { font: inherit; color: var(--text); background: var(--surface); border
 .cmd-failed { color: var(--critical); }
 .cmd-pending, .cmd-sent { color: var(--warn-ink); }
 h3 { font-size: 14px; margin: 18px 0 8px; }
+
+.nav-count { margin-left: 8px; background: #e34948; color: #fff; border-radius: 9px; padding: 0 7px; font-size: 12px; font-weight: 600; }
+pre.code.terminal { white-space: pre-wrap; word-break: normal; overflow-wrap: anywhere; max-height: 480px; overflow-y: auto; margin: 6px 0 0; }

@@ -81,6 +81,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/install-info", a.auth(a.installInfo))
 	a.detectionRoutes(mux)
 	a.fleetRoutes(mux)
+	a.pamRoutes(mux)
 
 	// Public: the installer fetches these before the host has any identity.
 	mux.HandleFunc("GET /pki/ca.crt", a.caCert)

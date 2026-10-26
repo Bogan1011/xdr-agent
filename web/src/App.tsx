@@ -10,6 +10,8 @@ import Deploy from "./pages/Deploy";
 import Alerts from "./pages/Alerts";
 import Rules from "./pages/Rules";
 import IOCs from "./pages/IOCs";
+import PAM from "./pages/PAM";
+import { usePoll } from "./hooks";
 
 export default function App() {
   const [user, setUser] = useState<string | null | undefined>(undefined);
@@ -23,6 +25,11 @@ export default function App() {
 
   if (user === undefined) return null;
   if (user === null) return <Login onLogin={setUser} />;
+  return <Shell user={user} onSignOut={() => setUser(null)} />;
+}
+
+function Shell({ user, onSignOut }: { user: string; onSignOut: () => void }) {
+  const pam = usePoll(api.pamSummary, 15000);
 
   return (
     <div className="shell">
@@ -37,13 +44,16 @@ export default function App() {
           <NavLink to="/events">Event search</NavLink>
           <NavLink to="/rules">Detection rules</NavLink>
           <NavLink to="/iocs">Threat intel</NavLink>
+          <NavLink to="/pam">
+            Privileged access{pam.data?.pending ? <span className="nav-count">{pam.data.pending}</span> : null}
+          </NavLink>
           <NavLink to="/deploy">Deploy agents</NavLink>
         </nav>
         <div className="sidebar-foot">
           <span>{user}</span>
           <button
             className="link"
-            onClick={() => api.logout().finally(() => setUser(null))}
+            onClick={() => api.logout().finally(onSignOut)}
           >
             Sign out
           </button>
@@ -59,6 +69,7 @@ export default function App() {
           <Route path="/alerts" element={<Alerts />} />
           <Route path="/rules" element={<Rules />} />
           <Route path="/iocs" element={<IOCs />} />
+          <Route path="/pam" element={<PAM />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

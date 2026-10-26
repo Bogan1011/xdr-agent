@@ -33,6 +33,6 @@ if systemctl list-unit-files xdr-agent.service >/dev/null 2>&1; then
 fi
 rm -rf /etc/systemd/system/xdr-agent.service /etc/systemd/system/xdr-agent.service.d
 systemctl daemon-reload
-rm -f /usr/local/bin/xdr-agent
-rm -rf /etc/xdr-agent /var/lib/xdr-agent
+rm -f /usr/local/bin/xdr-agent /etc/sudoers.d/xdr-jit-* /etc/sudoers.d/xdr-session-recording
+rm -rf /etc/xdr-agent /var/lib/xdr-agent /run/xdr-agent
 echo "xdr-agent removed. Delete the endpoint in the dashboard to drop its record."

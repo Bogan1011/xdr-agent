@@ -20,6 +20,8 @@ service on the host.
 | Detection | Sigma-style behaviour rules (20 built-in for Linux, custom rules in the console), YARA scanning on the agent, IOC lists and feeds (SHA-256, IP/CIDR, domain) |
 | Alerts | Deduplicated alerts with severity, MITRE ATT&CK tags, triage status and the triggering event |
 | Response | Kill process, quarantine and restore file, isolate and un-isolate host, on-demand YARA scan; optional automatic response per rule |
+| Fleet | Self-update with rollback, tamper protection with a maintenance token, SSH host key pinning |
+| Privileged access | Just-in-time sudo with console approval, recorded sudo sessions, privileged account inventory with alerts |
 
 ## Detection and response
 
@@ -135,6 +137,33 @@ Then revoke or delete the endpoint in the console.
   once. The first SSH host key a host presents is pinned; a changed key
   fails the install until you forget it on the Deploy page.
 
+## Privileged access (PAM)
+
+* **Just-in-time sudo.** A user on a host runs
+  `xdr-agent elevate -reason "restart nginx, OPS-42" -duration 30m` (no root
+  needed). The agent identifies the user from the local socket, the request
+  shows up under **Privileged access** in the console, and an admin approves
+  (optionally shortening it) or denies. On approval the agent installs a
+  validated drop-in, `/etc/sudoers.d/xdr-jit-<uid>`, with a `NOTAFTER` limit
+  where sudo supports it. At expiry or on **Revoke** the agent removes it and
+  ends the user's running sudo sessions. Admins can also grant sudo to a
+  user directly from the same page. Requests nobody decides expire after
+  24 hours; grants last 5 minutes to 8 hours.
+* **Session recording.** Granted sudo sessions are recorded by sudo's own
+  I/O logging (`log_output`) under `/var/log/xdr-agent/sudo-io`. The agent
+  uploads each session's terminal output (up to 2 MiB) when it ends, and the
+  console shows it as text next to the grant that allowed it. Per endpoint,
+  **Record all** extends recording to every sudo session on the host.
+* **Privileged accounts.** Each agent reports the accounts that can act as
+  root: uid 0, sudoers rules (users, `%groups`, `User_Alias`, drop-ins) and
+  root-equivalent groups (`docker`, `lxd`, `disk`), with password state,
+  NOPASSWD, SSH key count and last login. An account that gains a new path
+  to root raises a **New privileged account** alert.
+
+See [docs/comparison.md](docs/comparison.md) for how this product compares
+with Trend Micro Vision One and CrowdStrike Falcon, and the gaps that set
+the roadmap.
+
 ## Development
 
 ```bash
@@ -165,6 +194,10 @@ with `cd web && npm run dev` (it proxies `/api` to `:8080`).
 * eBPF file events report a write when a file is opened for writing, and
   hash it a second later. Paths inside containers are relative to the
   container's root.
+* Session recording relies on sudo. A user who becomes root can delete
+  local recordings before upload or start shells that sudo does not log
+  (e.g. `su` with a known root password); their commands still show up in
+  process telemetry. Recordings are terminal output, not keystrokes.
 * Isolating the host that runs the console does not cut it off: the
   console's own address must stay reachable, and on that host it is the
   host itself. Test isolation on a second machine.
@@ -175,9 +208,10 @@ with `cd web && npm run dev` (it proxies `/api` to `:8080`).
 2. **Detection and response** (done): Sigma-style rules, YARA
    scanning, IOC feeds, alerts, and response actions. eBPF collectors for
    process-attributed file and network events.
-3. **Fleet management** (this release): remote install and uninstall from
+3. **Fleet management** (done): remote install and uninstall from
    the console over SSH, agent self-update with rollback, tamper protection,
    SSH host key pinning.
-4. **PAM**: just-in-time sudo elevation with approval, session recording,
-   privileged account inventory. Then a comparison with Vision One and
-   CrowdStrike Falcon, and the Windows agent.
+4. **PAM** (this release): just-in-time sudo elevation with approval,
+   session recording, privileged account inventory, and the
+   [comparison](docs/comparison.md) with Vision One and CrowdStrike Falcon.
+5. **Windows agent**, then the gaps listed in the comparison.

@@ -26,6 +26,15 @@ service AgentService {
   // per chunk so the mTLS auth interceptor covers it and a failed chunk is
   // retried alone.
   rpc GetAgentBinary(AgentBinaryRequest) returns (AgentBinaryChunk);
+
+  // Privileged access management.
+  // A local user asks for just-in-time sudo; an admin decides in the console.
+  rpc RequestElevation(ElevationRequest) returns (ElevationStatus);
+  rpc GetElevation(GetElevationRequest) returns (ElevationStatus);
+  // The host's privileged accounts, sent when they change and periodically.
+  rpc ReportPrivilegedAccounts(PrivilegedAccounts) returns (PrivilegedAccountsAck);
+  // One finished sudo session recorded by sudo's I/O logging.
+  rpc UploadSessionRecording(SessionRecording) returns (SessionRecordingAck);
 }
 
 message HostInfo {
@@ -76,6 +85,12 @@ message HeartbeatResponse {
   // Version of the current detection content; empty when there is none.
   string content_version = 3;
   TamperPolicy tamper = 4;
+  PamPolicy pam = 5;
+}
+
+message PamPolicy {
+  // Record every sudo session on the host, not only just-in-time grants.
+  bool record_all_sudo = 1;
 }
 
 message TamperPolicy {
@@ -101,6 +116,10 @@ enum CommandType {
   COMMAND_TYPE_SCAN_PATH = 7;
   // args: version, sha256 (of the binary for the agent's architecture).
   COMMAND_TYPE_UPDATE_AGENT = 8;
+  // args: request_id, user, duration_seconds. Grants sudo until it expires.
+  COMMAND_TYPE_GRANT_ELEVATION = 9;
+  // args: request_id, user. Removes the grant and ends the user's sudo sessions.
+  COMMAND_TYPE_REVOKE_ELEVATION = 10;
 }
 
 message AgentCommand {
@@ -230,3 +249,68 @@ message TamperEvent {
   uint32 pid = 3;
   string exe = 4;
 }
+
+message ElevationRequest {
+  // The local account, identified by the agent from the socket peer.
+  string user = 1;
+  uint32 uid = 2;
+  string reason = 3;
+  uint64 duration_seconds = 4;
+}
+
+message GetElevationRequest {
+  string id = 1;
+}
+
+message ElevationStatus {
+  string id = 1;
+  // pending, approved, active, denied, expired, revoked or failed.
+  string status = 2;
+  string note = 3;
+  int64 expires_unix = 4;
+}
+
+message PrivilegedAccount {
+  string name = 1;
+  uint32 uid = 2;
+  string shell = 3;
+  string home = 4;
+  // Why the account is privileged, e.g. uid0, group:sudo, sudoers, jit.
+  repeated string sources = 5;
+  repeated string groups = 6;
+  // A sudoers rule lets it run commands without a password.
+  bool nopasswd = 7;
+  // set, locked, empty or none.
+  string password = 8;
+  int64 password_changed_unix = 9;
+  uint32 ssh_keys = 10;
+  int64 last_login_unix = 11;
+  string last_login_from = 12;
+}
+
+message PrivilegedAccounts {
+  repeated PrivilegedAccount accounts = 1;
+  // Accounts in /etc/passwd with a login shell.
+  uint32 interactive_accounts = 2;
+}
+
+message PrivilegedAccountsAck {}
+
+message SessionRecording {
+  // Unique per host: the sudo I/O log directory.
+  string session_id = 1;
+  string user = 2;
+  string runas_user = 3;
+  string tty = 4;
+  string cwd = 5;
+  string command = 6;
+  int64 start_unix = 7;
+  uint64 duration_ms = 8;
+  // Terminal output (ttyout or stdout), capped by the agent.
+  bytes output = 9;
+  bool truncated = 10;
+  // The just-in-time grant active when the session ran, if any.
+  string request_id = 11;
+}
+
+message SessionRecordingAck {}

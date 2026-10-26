@@ -17,8 +17,8 @@ nft delete table inet xdr_isolation 2>/dev/null || true
 systemctl disable --now xdr-agent 2>/dev/null || true
 rm -rf /etc/systemd/system/xdr-agent.service /etc/systemd/system/xdr-agent.service.d
 systemctl daemon-reload
-rm -f /usr/local/bin/xdr-agent
-rm -rf /etc/xdr-agent /var/lib/xdr-agent`
+rm -f /usr/local/bin/xdr-agent /etc/sudoers.d/xdr-jit-* /etc/sudoers.d/xdr-session-recording
+rm -rf /etc/xdr-agent /var/lib/xdr-agent /run/xdr-agent`
 
 func (a *Agent) runCommand(ctx context.Context, c *xdrv1.AgentCommand) {
 	switch c.Type {
@@ -63,6 +63,10 @@ func (a *Agent) respond(ctx context.Context, c *xdrv1.AgentCommand) {
 		cancel()
 	case xdrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT:
 		msg, err = a.selfUpdate(ctx, c.Args)
+	case xdrv1.CommandType_COMMAND_TYPE_GRANT_ELEVATION:
+		msg, err = a.pam.Grant(c.Args)
+	case xdrv1.CommandType_COMMAND_TYPE_REVOKE_ELEVATION:
+		msg, err = a.pam.Revoke(c.Args)
 	default:
 		err = fmt.Errorf("unsupported command %s", c.Type)
 	}

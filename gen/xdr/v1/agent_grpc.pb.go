@@ -129,11 +129,15 @@ var EnrollmentService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	AgentService_Heartbeat_FullMethodName           = "/xdr.v1.AgentService/Heartbeat"
-	AgentService_SendEvents_FullMethodName          = "/xdr.v1.AgentService/SendEvents"
-	AgentService_GetDetectionContent_FullMethodName = "/xdr.v1.AgentService/GetDetectionContent"
-	AgentService_ReportCommandResult_FullMethodName = "/xdr.v1.AgentService/ReportCommandResult"
-	AgentService_GetAgentBinary_FullMethodName      = "/xdr.v1.AgentService/GetAgentBinary"
+	AgentService_Heartbeat_FullMethodName                = "/xdr.v1.AgentService/Heartbeat"
+	AgentService_SendEvents_FullMethodName               = "/xdr.v1.AgentService/SendEvents"
+	AgentService_GetDetectionContent_FullMethodName      = "/xdr.v1.AgentService/GetDetectionContent"
+	AgentService_ReportCommandResult_FullMethodName      = "/xdr.v1.AgentService/ReportCommandResult"
+	AgentService_GetAgentBinary_FullMethodName           = "/xdr.v1.AgentService/GetAgentBinary"
+	AgentService_RequestElevation_FullMethodName         = "/xdr.v1.AgentService/RequestElevation"
+	AgentService_GetElevation_FullMethodName             = "/xdr.v1.AgentService/GetElevation"
+	AgentService_ReportPrivilegedAccounts_FullMethodName = "/xdr.v1.AgentService/ReportPrivilegedAccounts"
+	AgentService_UploadSessionRecording_FullMethodName   = "/xdr.v1.AgentService/UploadSessionRecording"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -155,6 +159,14 @@ type AgentServiceClient interface {
 	// per chunk so the mTLS auth interceptor covers it and a failed chunk is
 	// retried alone.
 	GetAgentBinary(ctx context.Context, in *AgentBinaryRequest, opts ...grpc.CallOption) (*AgentBinaryChunk, error)
+	// Privileged access management.
+	// A local user asks for just-in-time sudo; an admin decides in the console.
+	RequestElevation(ctx context.Context, in *ElevationRequest, opts ...grpc.CallOption) (*ElevationStatus, error)
+	GetElevation(ctx context.Context, in *GetElevationRequest, opts ...grpc.CallOption) (*ElevationStatus, error)
+	// The host's privileged accounts, sent when they change and periodically.
+	ReportPrivilegedAccounts(ctx context.Context, in *PrivilegedAccounts, opts ...grpc.CallOption) (*PrivilegedAccountsAck, error)
+	// One finished sudo session recorded by sudo's I/O logging.
+	UploadSessionRecording(ctx context.Context, in *SessionRecording, opts ...grpc.CallOption) (*SessionRecordingAck, error)
 }
 
 type agentServiceClient struct {
@@ -215,6 +227,46 @@ func (c *agentServiceClient) GetAgentBinary(ctx context.Context, in *AgentBinary
 	return out, nil
 }
 
+func (c *agentServiceClient) RequestElevation(ctx context.Context, in *ElevationRequest, opts ...grpc.CallOption) (*ElevationStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ElevationStatus)
+	err := c.cc.Invoke(ctx, AgentService_RequestElevation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentServiceClient) GetElevation(ctx context.Context, in *GetElevationRequest, opts ...grpc.CallOption) (*ElevationStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ElevationStatus)
+	err := c.cc.Invoke(ctx, AgentService_GetElevation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentServiceClient) ReportPrivilegedAccounts(ctx context.Context, in *PrivilegedAccounts, opts ...grpc.CallOption) (*PrivilegedAccountsAck, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PrivilegedAccountsAck)
+	err := c.cc.Invoke(ctx, AgentService_ReportPrivilegedAccounts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentServiceClient) UploadSessionRecording(ctx context.Context, in *SessionRecording, opts ...grpc.CallOption) (*SessionRecordingAck, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SessionRecordingAck)
+	err := c.cc.Invoke(ctx, AgentService_UploadSessionRecording_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -234,6 +286,14 @@ type AgentServiceServer interface {
 	// per chunk so the mTLS auth interceptor covers it and a failed chunk is
 	// retried alone.
 	GetAgentBinary(context.Context, *AgentBinaryRequest) (*AgentBinaryChunk, error)
+	// Privileged access management.
+	// A local user asks for just-in-time sudo; an admin decides in the console.
+	RequestElevation(context.Context, *ElevationRequest) (*ElevationStatus, error)
+	GetElevation(context.Context, *GetElevationRequest) (*ElevationStatus, error)
+	// The host's privileged accounts, sent when they change and periodically.
+	ReportPrivilegedAccounts(context.Context, *PrivilegedAccounts) (*PrivilegedAccountsAck, error)
+	// One finished sudo session recorded by sudo's I/O logging.
+	UploadSessionRecording(context.Context, *SessionRecording) (*SessionRecordingAck, error)
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -258,6 +318,18 @@ func (UnimplementedAgentServiceServer) ReportCommandResult(context.Context, *Com
 }
 func (UnimplementedAgentServiceServer) GetAgentBinary(context.Context, *AgentBinaryRequest) (*AgentBinaryChunk, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAgentBinary not implemented")
+}
+func (UnimplementedAgentServiceServer) RequestElevation(context.Context, *ElevationRequest) (*ElevationStatus, error) {
+	return nil, status.Error(codes.Unimplemented, "method RequestElevation not implemented")
+}
+func (UnimplementedAgentServiceServer) GetElevation(context.Context, *GetElevationRequest) (*ElevationStatus, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetElevation not implemented")
+}
+func (UnimplementedAgentServiceServer) ReportPrivilegedAccounts(context.Context, *PrivilegedAccounts) (*PrivilegedAccountsAck, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportPrivilegedAccounts not implemented")
+}
+func (UnimplementedAgentServiceServer) UploadSessionRecording(context.Context, *SessionRecording) (*SessionRecordingAck, error) {
+	return nil, status.Error(codes.Unimplemented, "method UploadSessionRecording not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -370,6 +442,78 @@ func _AgentService_GetAgentBinary_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_RequestElevation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ElevationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).RequestElevation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_RequestElevation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).RequestElevation(ctx, req.(*ElevationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentService_GetElevation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetElevationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).GetElevation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_GetElevation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).GetElevation(ctx, req.(*GetElevationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentService_ReportPrivilegedAccounts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PrivilegedAccounts)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).ReportPrivilegedAccounts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_ReportPrivilegedAccounts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).ReportPrivilegedAccounts(ctx, req.(*PrivilegedAccounts))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentService_UploadSessionRecording_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SessionRecording)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).UploadSessionRecording(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_UploadSessionRecording_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).UploadSessionRecording(ctx, req.(*SessionRecording))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -396,6 +540,22 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetAgentBinary",
 			Handler:    _AgentService_GetAgentBinary_Handler,
+		},
+		{
+			MethodName: "RequestElevation",
+			Handler:    _AgentService_RequestElevation_Handler,
+		},
+		{
+			MethodName: "GetElevation",
+			Handler:    _AgentService_GetElevation_Handler,
+		},
+		{
+			MethodName: "ReportPrivilegedAccounts",
+			Handler:    _AgentService_ReportPrivilegedAccounts_Handler,
+		},
+		{
+			MethodName: "UploadSessionRecording",
+			Handler:    _AgentService_UploadSessionRecording_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
