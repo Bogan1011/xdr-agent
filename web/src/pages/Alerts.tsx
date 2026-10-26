@@ -88,6 +88,7 @@ export function AlertTable({ alerts, onSelect, showHost = true }: { alerts: Aler
 function target(a: Alert): string {
   const e = a.event;
   if (e.type === "net_connect") return `${e.exe || "?"} → ${e.remote_addr}:${e.remote_port}`;
+  if (e.type === "net_accept") return `${e.exe || "?"} ← ${e.remote_addr}:${e.remote_port}`;
   if (e.type.startsWith("file") || e.type === "yara_match") return e.path;
   return e.args || e.exe;
 }

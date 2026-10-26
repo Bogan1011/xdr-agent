@@ -53,8 +53,8 @@ service on the host.
  ┌──────────────────────────────────────────────────────────────┐
  │ xdr-agent (systemd, root)                                    │
  │   process ── netlink proc connector                          │
- │   file ───── inotify                       gRPC + mTLS :8444 │
- │   network ── /proc/net polling  ─────────────────────────┐   │
+ │   file ───── eBPF (or inotify)             gRPC + mTLS :8444 │
+ │   network ── eBPF connect/accept, /proc/net ─────────────┐   │
  │                                                          ▼   │
  │ docker compose                                               │
  │   xdr-server ── enrollment :8443, ingest :8444, console :8080│
@@ -130,9 +130,15 @@ with `cd web && npm run dev` (it proxies `/api` to `:8080`).
   put the console behind HTTPS before using it outside a lab.
 * Console login is a single admin account; sessions are in memory and end
   when the server restarts.
-* inotify cannot tell which process changed a file, and network polling
-  every 5 seconds can miss very short connections. Both are fixed by the
-  eBPF collectors planned below.
+* File and network events name the process behind them only when the
+  eBPF collectors load (kernel 5.8+ with BTF, kprobes, and
+  CONFIG_SECURITY_PATH; stock Ubuntu 20.04 HWE and later). Otherwise the
+  agent logs why and falls back to inotify, which cannot tell who changed a
+  file, and /proc/net polling, which can miss very short connections. Set
+  `ebpf: off` in the agent config to force the fallback.
+* eBPF file events report a write when a file is opened for writing, and
+  hash it a second later. Paths inside containers are relative to the
+  container's root.
 * Isolating the host that runs the console does not cut it off: the
   console's own address must stay reachable, and on that host it is the
   host itself. Test isolation on a second machine.
@@ -141,8 +147,8 @@ with `cd web && npm run dev` (it proxies `/api` to `:8080`).
 
 1. **Foundation** (done): telemetry, console, enrollment, installer.
 2. **Detection and response** (this release): Sigma-style rules, YARA
-   scanning, IOC feeds, alerts, and response actions. Next: eBPF collectors
-   for process-attributed file and network events.
+   scanning, IOC feeds, alerts, and response actions. eBPF collectors for
+   process-attributed file and network events.
 3. **Fleet management**: remote install and uninstall from the console over
    SSH, agent self-update, tamper protection; roll out to all VMs.
 4. **PAM**: just-in-time sudo elevation with approval, session recording,

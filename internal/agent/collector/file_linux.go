@@ -18,8 +18,8 @@ import (
 )
 
 // File watches configured directory trees with inotify. inotify cannot say
-// which process touched a file; the eBPF/fanotify collector planned for a
-// later step adds that.
+// which process touched a file; it is the fallback for kernels where the
+// eBPF collector (EBPFFile) cannot load.
 type File struct {
 	Paths      []string // directory trees to watch recursively
 	Exclude    []string // path prefixes to skip

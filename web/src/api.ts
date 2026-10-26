@@ -310,6 +310,7 @@ export const typeLabels: Record<string, string> = {
   file_rename: "File renamed",
   file_attrib: "File permissions",
   net_connect: "Connection",
+  net_accept: "Inbound connection",
   net_listen: "Listening port",
   yara_match: "YARA match",
 };

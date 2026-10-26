@@ -20,6 +20,9 @@ import (
 // connections shorter than the interval; the eBPF collector fixes that.
 type Network struct {
 	Interval time.Duration
+	// ListenOnly reports only listening sockets, for when the eBPF collector
+	// reports connections.
+	ListenOnly bool
 }
 
 const (
@@ -67,7 +70,7 @@ func (n *Network) Run(ctx context.Context, emit Emit) error {
 			owners := socketOwners()
 			self := uint32(os.Getpid())
 			for _, s := range fresh {
-				if first && s.state != tcpListen {
+				if (first || n.ListenOnly) && s.state != tcpListen {
 					continue
 				}
 				pid := owners[s.inode]

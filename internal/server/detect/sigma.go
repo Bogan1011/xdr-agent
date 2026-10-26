@@ -87,6 +87,7 @@ var categories = map[string][]string{
 	"file_rename":         {"file_rename"},
 	"file_delete":         {"file_delete"},
 	"network_connection":  {"net_connect"},
+	"network_accept":      {"net_accept"},
 	"network_listen":      {"net_listen"},
 	"yara":                {"yara_match"},
 }

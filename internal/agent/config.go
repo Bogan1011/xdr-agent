@@ -24,9 +24,13 @@ type Config struct {
 	FileExclude     []string      `yaml:"file_exclude"`
 	MaxFileWatches  int           `yaml:"max_file_watches"`
 	NetworkInterval time.Duration `yaml:"network_interval"`
-	QueueSize       int           `yaml:"queue_size"`
-	BatchSize       int           `yaml:"batch_size"`
-	LogLevel        string        `yaml:"log_level"`
+	// EBPF selects the file and network collectors: "auto" uses eBPF when the
+	// kernel supports it and falls back to inotify and /proc; "off" never
+	// loads eBPF.
+	EBPF      string `yaml:"ebpf"`
+	QueueSize int    `yaml:"queue_size"`
+	BatchSize int    `yaml:"batch_size"`
+	LogLevel  string `yaml:"log_level"`
 	// ScanMaxBytes is the largest file the YARA scanner reads.
 	ScanMaxBytes int64 `yaml:"scan_max_bytes"`
 }
@@ -45,6 +49,7 @@ func LoadConfig(path string) (*Config, error) {
 		},
 		MaxFileWatches:  8192,
 		NetworkInterval: 5 * time.Second,
+		EBPF:            "auto",
 		QueueSize:       20000,
 		BatchSize:       1000,
 		LogLevel:        "info",
