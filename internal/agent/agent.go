@@ -40,6 +40,7 @@ type Agent struct {
 	wake    chan struct{}
 
 	tamper *Tamper
+	pam    *PAM
 	upd    updater
 	// ctx is cancelled by Stop, e.g. to restart into an updated binary.
 	ctx    context.Context
@@ -55,6 +56,7 @@ func New(cfg *Config, log *slog.Logger) *Agent {
 		wake:  make(chan struct{}, 1),
 	}
 	a.tamper = newTamper(cfg, log.With("component", "tamper"), a.tamperEvent)
+	a.pam = newPAM(cfg, log.With("component", "pam"))
 	a.ctx, a.cancel = context.WithCancel(context.Background())
 	return a
 }
@@ -188,8 +190,9 @@ func (a *Agent) Run() error {
 			a.runCollector(ctx, c)
 		}(c)
 	}
-	wg.Add(3)
+	wg.Add(4)
 	go func() { defer wg.Done(); a.scanner.Run(ctx) }()
+	go func() { defer wg.Done(); a.pam.Run(ctx, client) }()
 	go func() { defer wg.Done(); a.sendLoop(ctx, client) }()
 	go func() { defer wg.Done(); a.heartbeatLoop(ctx, client, host) }()
 	wg.Wait()
@@ -271,6 +274,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context, client xdrv1.AgentServiceClie
 		if err == nil {
 			a.confirmUpdate()
 			a.tamper.SetPolicy(resp.Tamper)
+			a.pam.SetPolicy(resp.Pam)
 		}
 		if err == nil && resp.ContentVersion != a.scanner.Version() {
 			a.updateContent(ctx, client)

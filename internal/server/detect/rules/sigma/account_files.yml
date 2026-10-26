@@ -9,4 +9,8 @@ detection:
     path: [/etc/passwd, /etc/shadow, /etc/group, /etc/gshadow, /etc/sudoers]
   sudoers_d:
     path|startswith: /etc/sudoers.d/
-  condition: selection or sudoers_d
+  # The agent's own just-in-time sudo grants.
+  filter_jit:
+    exe: /usr/local/bin/xdr-agent
+    path|startswith: [/etc/sudoers.d/xdr-, /etc/sudoers.d/.xdr-]
+  condition: (selection or sudoers_d) and not filter_jit

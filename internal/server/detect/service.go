@@ -191,6 +191,18 @@ func ValidateCommand(typ string, args map[string]string) error {
 			}
 		}
 	case "unisolate_host":
+	case "grant_elevation":
+		if err := need("user"); err != nil {
+			return err
+		}
+		if err := need("request_id"); err != nil {
+			return err
+		}
+		if s, err := strconv.ParseUint(args["duration_seconds"], 10, 32); err != nil || s == 0 {
+			return fmt.Errorf("grant_elevation requires duration_seconds")
+		}
+	case "revoke_elevation":
+		return need("request_id")
 	default:
 		return fmt.Errorf("unknown command type %q", typ)
 	}

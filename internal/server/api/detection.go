@@ -150,6 +150,10 @@ func (a *API) createCommand(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "agent is revoked")
 		return
 	}
+	if strings.HasSuffix(req.Type, "_elevation") {
+		writeErr(w, http.StatusBadRequest, "grant and revoke sudo from Privileged access")
+		return
+	}
 	if err := detect.ValidateCommand(req.Type, req.Args); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return

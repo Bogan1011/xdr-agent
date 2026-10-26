@@ -78,13 +78,15 @@ type Agents struct {
 }
 
 var commandTypes = map[string]xdrv1.CommandType{
-	"kill_process":    xdrv1.CommandType_COMMAND_TYPE_KILL_PROCESS,
-	"quarantine_file": xdrv1.CommandType_COMMAND_TYPE_QUARANTINE_FILE,
-	"restore_file":    xdrv1.CommandType_COMMAND_TYPE_RESTORE_FILE,
-	"isolate_host":    xdrv1.CommandType_COMMAND_TYPE_ISOLATE_HOST,
-	"unisolate_host":  xdrv1.CommandType_COMMAND_TYPE_UNISOLATE_HOST,
-	"scan_path":       xdrv1.CommandType_COMMAND_TYPE_SCAN_PATH,
-	"update_agent":    xdrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT,
+	"kill_process":     xdrv1.CommandType_COMMAND_TYPE_KILL_PROCESS,
+	"quarantine_file":  xdrv1.CommandType_COMMAND_TYPE_QUARANTINE_FILE,
+	"restore_file":     xdrv1.CommandType_COMMAND_TYPE_RESTORE_FILE,
+	"isolate_host":     xdrv1.CommandType_COMMAND_TYPE_ISOLATE_HOST,
+	"unisolate_host":   xdrv1.CommandType_COMMAND_TYPE_UNISOLATE_HOST,
+	"scan_path":        xdrv1.CommandType_COMMAND_TYPE_SCAN_PATH,
+	"update_agent":     xdrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT,
+	"grant_elevation":  xdrv1.CommandType_COMMAND_TYPE_GRANT_ELEVATION,
+	"revoke_elevation": xdrv1.CommandType_COMMAND_TYPE_REVOKE_ELEVATION,
 }
 
 type ctxKey struct{}
@@ -137,6 +139,11 @@ func (s *Agents) Heartbeat(ctx context.Context, req *xdrv1.HeartbeatRequest) (*x
 		resp.Tamper = &xdrv1.TamperPolicy{Enabled: on, MaintenanceTokenSha256: hex.EncodeToString(sum[:])}
 	} else {
 		s.Log.Warn("tamper policy", "agent_id", a.id, "err", err)
+	}
+	if on, err := s.DB.PamRecordAll(ctx, a.id); err == nil {
+		resp.Pam = &xdrv1.PamPolicy{RecordAllSudo: on}
+	} else {
+		s.Log.Warn("pam policy", "agent_id", a.id, "err", err)
 	}
 	cmds, err := s.DB.TakeCommands(ctx, a.id)
 	if err != nil {
@@ -191,6 +198,9 @@ func (s *Agents) ReportCommandResult(ctx context.Context, req *xdrv1.CommandResu
 	}
 	s.Log.Info("response command finished", "command_id", c.ID, "type", c.Type, "hostname", a.hostname,
 		"success", req.Success, "message", c.Message)
+	if c.Type == "grant_elevation" {
+		s.grantDone(ctx, c, req.Success)
+	}
 	return &xdrv1.CommandResultAck{}, nil
 }
 

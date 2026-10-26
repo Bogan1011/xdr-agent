@@ -46,6 +46,10 @@ export default function EndpointDetail() {
     await api.setTamperProtection(id, on);
     agent.refresh();
   }
+  async function toggleRecording() {
+    await api.setPamRecording(id, !a!.pam_record_all);
+    agent.refresh();
+  }
   async function showToken() {
     setToken(token ? "" : (await api.maintenanceToken(id)).token);
   }
@@ -98,6 +102,14 @@ export default function EndpointDetail() {
               </dd>
             </div>
           )}
+          <div>
+            <dt>Sudo session recording</dt>
+            <dd>
+              {a.pam_record_all ? "All sessions" : "Just-in-time grants"}{" "}
+              {!a.revoked && <button className="link" onClick={toggleRecording}>{a.pam_record_all ? "Record grants only" : "Record all"}</button>}{" "}
+              <Link to="/pam">Privileged access</Link>
+            </dd>
+          </div>
           <div><dt>Agent CPU / memory</dt><dd>{a.cpu_percent.toFixed(1)}% · {formatBytes(a.rss_bytes)}</dd></div>
           <div><dt>Events sent / dropped</dt><dd>{a.events_sent.toLocaleString()} / {a.events_dropped.toLocaleString()}</dd></div>
           <div><dt>Enrolled</dt><dd>{new Date(a.enrolled_at).toLocaleString()}</dd></div>

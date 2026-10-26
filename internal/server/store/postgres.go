@@ -103,7 +103,10 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
 	if err != nil {
 		return err
 	}
-	return p.migrateDetection(ctx)
+	if err := p.migrateDetection(ctx); err != nil {
+		return err
+	}
+	return p.migratePAM(ctx)
 }
 
 type Agent struct {
@@ -135,6 +138,8 @@ type Agent struct {
 	// the agent reports it applied.
 	TamperProtection bool `json:"tamper_protection"`
 	TamperProtected  bool `json:"tamper_protected"`
+	// PamRecordAll records every sudo session, not only just-in-time grants.
+	PamRecordAll bool `json:"pam_record_all"`
 	// Updating is true while a self-update command is queued or running.
 	Updating bool `json:"updating"`
 }
@@ -142,7 +147,7 @@ type Agent struct {
 const agentCols = `id, hostname, os, os_version, kernel, arch, ip_addresses, agent_version, machine_id,
 	COALESCE(cert_expires, 'epoch'), enrolled_at, COALESCE(last_seen, 'epoch'), events_sent, events_dropped,
 	cpu_percent, rss_bytes, revoked, pending_command, COALESCE(uninstalled_at, 'epoch'), isolated, content_version,
-	tamper_protection, tamper_protected,
+	tamper_protection, tamper_protected, pam_record_all,
 	EXISTS (SELECT 1 FROM commands c WHERE c.agent_id = agents.id AND c.type = 'update_agent' AND c.status IN ('pending', 'sent'))`
 
 func scanAgent(row pgx.Row) (*Agent, error) {
@@ -150,7 +155,7 @@ func scanAgent(row pgx.Row) (*Agent, error) {
 	err := row.Scan(&a.ID, &a.Hostname, &a.OS, &a.OSVersion, &a.Kernel, &a.Arch, &a.IPAddresses, &a.AgentVersion,
 		&a.MachineID, &a.CertExpires, &a.EnrolledAt, &a.LastSeen, &a.EventsSent, &a.EventsDropped,
 		&a.CPUPercent, &a.RSSBytes, &a.Revoked, &a.PendingCommand, &a.UninstalledAt, &a.Isolated, &a.ContentVersion,
-		&a.TamperProtection, &a.TamperProtected, &a.Updating)
+		&a.TamperProtection, &a.TamperProtected, &a.PamRecordAll, &a.Updating)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}

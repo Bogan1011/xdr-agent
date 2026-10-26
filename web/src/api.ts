@@ -24,6 +24,7 @@ export interface Agent {
   tamper_protection: boolean;
   tamper_protected: boolean;
   updating: boolean;
+  pam_record_all: boolean;
 }
 
 export interface Fleet {
@@ -48,7 +49,7 @@ export interface Alert {
   hostname: string;
   rule_id: string;
   rule_name: string;
-  kind: "sigma" | "ioc" | "yara";
+  kind: "sigma" | "ioc" | "yara" | "pam";
   severity: Severity;
   tags: string[];
   detail: string;
@@ -73,7 +74,9 @@ export type CommandType =
   | "isolate_host"
   | "unisolate_host"
   | "scan_path"
-  | "update_agent";
+  | "update_agent"
+  | "grant_elevation"
+  | "revoke_elevation";
 
 export interface Command {
   id: string;
@@ -197,6 +200,64 @@ export interface InstallInfo {
   base_url: string;
 }
 
+export type ElevationStatus = "pending" | "approved" | "active" | "denied" | "expired" | "revoked" | "failed";
+
+export interface Elevation {
+  id: string;
+  agent_id: string;
+  hostname: string;
+  username: string;
+  uid: number;
+  reason: string;
+  duration_seconds: number;
+  status: ElevationStatus;
+  requested_by: string;
+  decided_by: string;
+  note: string;
+  created_at: string;
+  decided_at: string;
+  expires_at: string;
+}
+
+export interface PrivilegedAccount {
+  name: string;
+  uid: number;
+  shell: string;
+  home: string;
+  sources: string[];
+  groups: string[];
+  nopasswd: boolean;
+  password: "set" | "locked" | "empty" | "none" | "";
+  password_changed_unix: string | number;
+  ssh_keys: number;
+  last_login_unix: string | number;
+  last_login_from: string;
+}
+
+export interface Inventory {
+  agent_id: string;
+  hostname: string;
+  accounts: PrivilegedAccount[];
+  interactive: number;
+  collected_at: string;
+}
+
+export interface PamSession {
+  id: number;
+  agent_id: string;
+  hostname: string;
+  username: string;
+  runas_user: string;
+  tty: string;
+  cwd: string;
+  command: string;
+  started_at: string;
+  duration_ms: number;
+  size: number;
+  truncated: boolean;
+  request_id: string;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -302,6 +363,23 @@ export const api = {
   refreshFeed: (id: number) => request<void>("POST", `/api/v1/ioc-feeds/${id}/refresh`, {}),
   setFeedEnabled: (id: number, enabled: boolean) => request<void>("POST", `/api/v1/ioc-feeds/${id}/enabled`, { enabled }),
   deleteFeed: (id: number) => request<void>("DELETE", `/api/v1/ioc-feeds/${id}`),
+
+  elevations: (agentId = "") =>
+    request<Elevation[]>("GET", `/api/v1/pam/requests${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ""}`),
+  pamSummary: () => request<{ pending: number }>("GET", "/api/v1/pam/summary"),
+  approveElevation: (id: string, duration_minutes: number) =>
+    request<void>("POST", `/api/v1/pam/requests/${encodeURIComponent(id)}/approve`, { duration_minutes }),
+  denyElevation: (id: string, note: string) =>
+    request<void>("POST", `/api/v1/pam/requests/${encodeURIComponent(id)}/deny`, { note }),
+  revokeElevation: (id: string) => request<void>("POST", `/api/v1/pam/requests/${encodeURIComponent(id)}/revoke`, {}),
+  grantElevation: (agentId: string, user: string, duration_minutes: number, reason: string) =>
+    request<{ id: string }>("POST", `/api/v1/agents/${encodeURIComponent(agentId)}/pam/grant`, { user, duration_minutes, reason }),
+  setPamRecording: (agentId: string, enabled: boolean) =>
+    request<void>("POST", `/api/v1/agents/${encodeURIComponent(agentId)}/pam/recording`, { enabled }),
+  privilegedAccounts: () => request<Inventory[]>("GET", "/api/v1/pam/accounts"),
+  pamSessions: (agentId = "") =>
+    request<PamSession[]>("GET", `/api/v1/pam/sessions${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ""}`),
+  pamSession: (id: number) => request<{ session: PamSession; output: string }>("GET", `/api/v1/pam/sessions/${id}`),
 };
 
 export const commandLabels: Record<CommandType, string> = {
@@ -312,6 +390,8 @@ export const commandLabels: Record<CommandType, string> = {
   unisolate_host: "End isolation",
   scan_path: "YARA scan",
   update_agent: "Update agent",
+  grant_elevation: "Grant sudo",
+  revoke_elevation: "Revoke sudo",
 };
 
 export const statusLabels: Record<AlertStatus, string> = {
