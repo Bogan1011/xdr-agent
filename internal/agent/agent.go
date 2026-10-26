@@ -41,7 +41,8 @@ type Agent struct {
 
 	tamper *Tamper
 	upd    updater
-	// cancel stops Run, e.g. to restart into an updated binary.
+	// ctx is cancelled by Stop, e.g. to restart into an updated binary.
+	ctx    context.Context
 	cancel context.CancelFunc
 }
 
@@ -54,7 +55,21 @@ func New(cfg *Config, log *slog.Logger) *Agent {
 		wake:  make(chan struct{}, 1),
 	}
 	a.tamper = newTamper(cfg, log.With("component", "tamper"), a.tamperEvent)
+	a.ctx, a.cancel = context.WithCancel(context.Background())
 	return a
+}
+
+// Stop ends Run for a clean exit. Some collectors can block shutdown, so the
+// process exits on its own after a grace period, still counted as clean.
+func (a *Agent) Stop() {
+	a.clearRunningMarker()
+	a.cancel()
+	go func() {
+		time.Sleep(10 * time.Second)
+		a.log.Warn("shutdown took too long, exiting")
+		a.clearRunningMarker()
+		os.Exit(0)
+	}()
 }
 
 // StopAllowed decides whether a termination signal may stop the agent.
@@ -85,8 +100,8 @@ func (a *Agent) send(e *xdrv1.Event) {
 	}
 }
 
-func (a *Agent) Run(ctx context.Context) error {
-	ctx, a.cancel = context.WithCancel(ctx)
+func (a *Agent) Run() error {
+	ctx := a.ctx
 	defer a.cancel()
 	defer a.clearRunningMarker()
 	a.checkUncleanExit()

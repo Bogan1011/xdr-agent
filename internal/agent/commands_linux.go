@@ -91,6 +91,6 @@ func (a *Agent) respond(ctx context.Context, c *xdrv1.AgentCommand) {
 	}
 	if c.Type == xdrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT && err == nil && a.loadPending() != nil {
 		a.log.Info("restarting into the updated agent")
-		a.cancel()
+		a.Stop()
 	}
 }

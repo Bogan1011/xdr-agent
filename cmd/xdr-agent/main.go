@@ -2,7 +2,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -43,8 +42,6 @@ func main() {
 	}
 
 	a := agent.New(cfg, log)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	// Every signal that would end the process goes through tamper protection,
 	// which ignores it unless protection is off, suspended or the host is
 	// shutting down.
@@ -54,14 +51,14 @@ func main() {
 		for s := range sigs {
 			if a.StopAllowed(s) {
 				log.Info("stopping", "signal", s.String())
-				cancel()
+				a.Stop()
 				return
 			}
 		}
 	}()
 
 	log.Info("xdr-agent starting", "version", agent.Version, "server", cfg.Server)
-	if err := a.Run(ctx); err != nil {
+	if err := a.Run(); err != nil {
 		log.Error("agent stopped", "err", err)
 		os.Exit(1)
 	}
