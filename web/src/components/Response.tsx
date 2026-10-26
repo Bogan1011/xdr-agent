@@ -17,6 +17,8 @@ function describe(c: Command): string {
       return a.quarantine_id;
     case "isolate_host":
       return a.allow ? `also allow ${a.allow}` : "console only";
+    case "update_agent":
+      return `to ${a.version}`;
     default:
       return "";
   }

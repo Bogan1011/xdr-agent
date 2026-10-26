@@ -172,6 +172,13 @@ func ValidateCommand(typ string, args map[string]string) error {
 		}
 	case "restore_file":
 		return need("quarantine_id")
+	case "update_agent":
+		if err := need("version"); err != nil {
+			return err
+		}
+		if len(args["sha256"]) != 64 {
+			return fmt.Errorf("update_agent requires a sha256")
+		}
 	case "isolate_host":
 		for _, a := range strings.Split(args["allow"], ",") {
 			if a = strings.TrimSpace(a); a == "" {

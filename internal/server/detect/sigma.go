@@ -77,6 +77,8 @@ var Fields = map[string]func(*store.Event) string{
 	"remote_port":      func(e *store.Event) string { return strconv.FormatUint(uint64(e.RemotePort), 10) },
 	"destinationport":  func(e *store.Event) string { return strconv.FormatUint(uint64(e.RemotePort), 10) },
 	"yara_rules":       func(e *store.Event) string { return e.Args },
+	"action":           func(e *store.Event) string { return e.Path },
+	"detail":           func(e *store.Event) string { return e.Args },
 }
 
 var categories = map[string][]string{
@@ -88,6 +90,7 @@ var categories = map[string][]string{
 	"file_delete":         {"file_delete"},
 	"network_connection":  {"net_connect"},
 	"network_accept":      {"net_accept"},
+	"agent_tamper":        {"agent_tamper"},
 	"network_listen":      {"net_listen"},
 	"yara":                {"yara_match"},
 }

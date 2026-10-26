@@ -13,6 +13,7 @@ ENROLL_PORT="{{.EnrollPort}}"
 AGENT_PORT="{{.AgentPort}}"
 TOKEN=""
 CA_SHA256=""
+MAINT_TOKEN=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -20,6 +21,7 @@ while [[ $# -gt 0 ]]; do
     --ca-sha256) CA_SHA256="$2"; shift 2 ;;
     --server-host) SERVER_HOST="$2"; shift 2 ;;
     --base-url) BASE_URL="$2"; shift 2 ;;
+    --maintenance-token) MAINT_TOKEN="$2"; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -54,6 +56,13 @@ curl -fsSL "$BASE_URL/downloads/SHA256SUMS" -o "$TMP/SHA256SUMS"
 WANT="$(grep " xdr-agent-linux-$ARCH\$" "$TMP/SHA256SUMS" | cut -d' ' -f1)"
 GOT="$(sha256sum "$TMP/xdr-agent" | cut -d' ' -f1)"
 [[ -n "$WANT" && "$WANT" == "$GOT" ]] || die "agent checksum mismatch"
+
+# A protected agent refuses to be stopped or overwritten until the console's
+# maintenance token suspends its tamper protection.
+if [[ -e /etc/systemd/system/xdr-agent.service.d/10-tamper-protection.conf ]]; then
+  [[ -n "$MAINT_TOKEN" ]] || die "the agent here has tamper protection on; rerun with --maintenance-token <token from the endpoint's page>"
+  /usr/local/bin/xdr-agent maintenance --token "$MAINT_TOKEN" || die "could not suspend tamper protection"
+fi
 
 if systemctl is-active --quiet xdr-agent; then
   systemctl stop xdr-agent
@@ -92,6 +101,9 @@ OOMScoreAdjust=-500
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# A maintenance window opened for this reinstall ends with it.
+rm -f /var/lib/xdr-agent/maintenance.json
 
 systemctl daemon-reload
 systemctl enable --now xdr-agent

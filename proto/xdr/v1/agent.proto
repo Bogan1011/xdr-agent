@@ -22,6 +22,10 @@ service AgentService {
   rpc GetDetectionContent(DetectionContentRequest) returns (DetectionContent);
   // Outcome of a response command delivered through the heartbeat.
   rpc ReportCommandResult(CommandResult) returns (CommandResultAck);
+  // One chunk of the agent binary the console offers, for self-update. Unary
+  // per chunk so the mTLS auth interceptor covers it and a failed chunk is
+  // retried alone.
+  rpc GetAgentBinary(AgentBinaryRequest) returns (AgentBinaryChunk);
 }
 
 message HostInfo {
@@ -53,6 +57,8 @@ message HeartbeatRequest {
   // True while the host's network is isolated by the agent.
   bool isolated = 3;
   string content_version = 4;
+  // True while the agent's tamper protection is applied on the host.
+  bool tamper_protected = 5;
 }
 
 message AgentStats {
@@ -69,6 +75,13 @@ message HeartbeatResponse {
   repeated AgentCommand commands = 2;
   // Version of the current detection content; empty when there is none.
   string content_version = 3;
+  TamperPolicy tamper = 4;
+}
+
+message TamperPolicy {
+  bool enabled = 1;
+  // SHA-256 (hex) of the maintenance token that unlocks the agent locally.
+  string maintenance_token_sha256 = 2;
 }
 
 enum CommandType {
@@ -86,6 +99,8 @@ enum CommandType {
   COMMAND_TYPE_UNISOLATE_HOST = 6;
   // args: path (file or directory) to scan with the YARA rules.
   COMMAND_TYPE_SCAN_PATH = 7;
+  // args: version, sha256 (of the binary for the agent's architecture).
+  COMMAND_TYPE_UPDATE_AGENT = 8;
 }
 
 message AgentCommand {
@@ -110,6 +125,17 @@ message DetectionContent {
   string yara_rules = 2;
 }
 
+message AgentBinaryRequest {
+  string arch = 1;
+  uint64 offset = 2;
+}
+
+message AgentBinaryChunk {
+  bytes data = 1;
+  uint64 total_size = 2;
+  string version = 3;
+}
+
 message EventBatch {
   repeated Event events = 1;
 }
@@ -131,6 +157,7 @@ enum EventType {
   EVENT_TYPE_NET_LISTEN = 9;
   EVENT_TYPE_YARA_MATCH = 10;
   EVENT_TYPE_NET_ACCEPT = 11;
+  EVENT_TYPE_AGENT_TAMPER = 12;
 }
 
 message Event {
@@ -142,6 +169,7 @@ message Event {
     FileEvent file = 11;
     NetworkEvent network = 12;
     YaraMatch yara = 13;
+    TamperEvent tamper = 14;
   }
 }
 
@@ -192,4 +220,13 @@ message YaraMatch {
   // The process whose binary matched, when the scan came from an exec.
   uint32 pid = 4;
   uint64 size = 5;
+}
+
+// Something tried to stop, change or remove the agent, or protection changed.
+message TamperEvent {
+  // e.g. signal_ignored, unclean_restart, protection_removed, maintenance.
+  string action = 1;
+  string detail = 2;
+  uint32 pid = 3;
+  string exe = 4;
 }

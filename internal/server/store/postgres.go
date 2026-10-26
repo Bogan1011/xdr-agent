@@ -75,6 +75,19 @@ CREATE TABLE IF NOT EXISTS enrollment_tokens (
 );
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS pending_command TEXT NOT NULL DEFAULT '';
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS uninstalled_at TIMESTAMPTZ;
+-- tamper_protection is what the console wants, tamper_protected what the
+-- agent last reported. The maintenance token unlocks a protected agent locally.
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS tamper_protection BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS tamper_protected BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS maintenance_token TEXT NOT NULL
+	DEFAULT ('xdrm_' || replace(gen_random_uuid()::text, '-', ''));
+CREATE TABLE IF NOT EXISTS known_hosts (
+	host        TEXT NOT NULL,
+	port        INT NOT NULL,
+	fingerprint TEXT NOT NULL,
+	first_seen  TIMESTAMPTZ NOT NULL DEFAULT now(),
+	PRIMARY KEY (host, port)
+);
 CREATE TABLE IF NOT EXISTS deploy_jobs (
 	id          BIGSERIAL PRIMARY KEY,
 	host        TEXT NOT NULL,
@@ -118,17 +131,26 @@ type Agent struct {
 	// Isolated is the network isolation state the agent last reported.
 	Isolated       bool   `json:"isolated"`
 	ContentVersion string `json:"content_version"`
+	// TamperProtection is the console's setting; TamperProtected is whether
+	// the agent reports it applied.
+	TamperProtection bool `json:"tamper_protection"`
+	TamperProtected  bool `json:"tamper_protected"`
+	// Updating is true while a self-update command is queued or running.
+	Updating bool `json:"updating"`
 }
 
 const agentCols = `id, hostname, os, os_version, kernel, arch, ip_addresses, agent_version, machine_id,
 	COALESCE(cert_expires, 'epoch'), enrolled_at, COALESCE(last_seen, 'epoch'), events_sent, events_dropped,
-	cpu_percent, rss_bytes, revoked, pending_command, COALESCE(uninstalled_at, 'epoch'), isolated, content_version`
+	cpu_percent, rss_bytes, revoked, pending_command, COALESCE(uninstalled_at, 'epoch'), isolated, content_version,
+	tamper_protection, tamper_protected,
+	EXISTS (SELECT 1 FROM commands c WHERE c.agent_id = agents.id AND c.type = 'update_agent' AND c.status IN ('pending', 'sent'))`
 
 func scanAgent(row pgx.Row) (*Agent, error) {
 	a := &Agent{}
 	err := row.Scan(&a.ID, &a.Hostname, &a.OS, &a.OSVersion, &a.Kernel, &a.Arch, &a.IPAddresses, &a.AgentVersion,
 		&a.MachineID, &a.CertExpires, &a.EnrolledAt, &a.LastSeen, &a.EventsSent, &a.EventsDropped,
-		&a.CPUPercent, &a.RSSBytes, &a.Revoked, &a.PendingCommand, &a.UninstalledAt, &a.Isolated, &a.ContentVersion)
+		&a.CPUPercent, &a.RSSBytes, &a.Revoked, &a.PendingCommand, &a.UninstalledAt, &a.Isolated, &a.ContentVersion,
+		&a.TamperProtection, &a.TamperProtected, &a.Updating)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -217,6 +239,25 @@ func (p *Postgres) TakeCommand(ctx context.Context, id string) (string, error) {
 		return "", nil
 	}
 	return cmd, err
+}
+
+// TamperPolicy is the protection setting and maintenance token sent to the agent.
+func (p *Postgres) TamperPolicy(ctx context.Context, id string) (bool, string, error) {
+	var on bool
+	var tok string
+	err := p.pool.QueryRow(ctx, `SELECT tamper_protection, maintenance_token FROM agents WHERE id = $1`, id).Scan(&on, &tok)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, "", ErrNotFound
+	}
+	return on, tok, err
+}
+
+func (p *Postgres) SetTamperProtection(ctx context.Context, id string, on bool) error {
+	tag, err := p.pool.Exec(ctx, `UPDATE agents SET tamper_protection = $2 WHERE id = $1`, id, on)
+	if err == nil && tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return err
 }
 
 func (p *Postgres) Touch(ctx context.Context, id string) error {
@@ -364,5 +405,48 @@ func (p *Postgres) ListDeployJobs(ctx context.Context, limit int) ([]*DeployJob,
 func (p *Postgres) FailStaleDeployJobs(ctx context.Context) error {
 	_, err := p.pool.Exec(ctx, `UPDATE deploy_jobs SET status = 'failed', log = log || E'\nserver restarted during the job',
 		finished_at = now() WHERE status IN ('pending', 'running')`)
+	return err
+}
+
+type KnownHost struct {
+	Host        string    `json:"host"`
+	Port        int       `json:"port"`
+	Fingerprint string    `json:"fingerprint"`
+	FirstSeen   time.Time `json:"first_seen"`
+}
+
+// KnownHostKey returns the SSH host key fingerprint pinned for host:port, or "".
+func (p *Postgres) KnownHostKey(ctx context.Context, host string, port int) (string, error) {
+	var fp string
+	err := p.pool.QueryRow(ctx, `SELECT fingerprint FROM known_hosts WHERE host = $1 AND port = $2`, host, port).Scan(&fp)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return fp, err
+}
+
+// PinHostKey records a host key on first use; an existing pin is kept.
+func (p *Postgres) PinHostKey(ctx context.Context, host string, port int, fp string) error {
+	_, err := p.pool.Exec(ctx, `INSERT INTO known_hosts (host, port, fingerprint) VALUES ($1, $2, $3)
+		ON CONFLICT (host, port) DO NOTHING`, host, port, fp)
+	return err
+}
+
+func (p *Postgres) ListKnownHosts(ctx context.Context) ([]*KnownHost, error) {
+	rows, err := p.pool.Query(ctx, `SELECT host, port, fingerprint, first_seen FROM known_hosts ORDER BY host, port`)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (*KnownHost, error) {
+		k := &KnownHost{}
+		return k, r.Scan(&k.Host, &k.Port, &k.Fingerprint, &k.FirstSeen)
+	})
+}
+
+func (p *Postgres) ForgetHostKey(ctx context.Context, host string, port int) error {
+	tag, err := p.pool.Exec(ctx, `DELETE FROM known_hosts WHERE host = $1 AND port = $2`, host, port)
+	if err == nil && tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
 	return err
 }

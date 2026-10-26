@@ -38,17 +38,42 @@ type Agent struct {
 	client  xdrv1.AgentServiceClient
 	scanner *Scanner
 	wake    chan struct{}
+
+	tamper *Tamper
+	upd    updater
+	// ctx is cancelled by Stop, e.g. to restart into an updated binary.
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func New(cfg *Config, log *slog.Logger) *Agent {
-	return &Agent{
+	a := &Agent{
 		cfg:   cfg,
 		log:   log,
 		queue: make(chan *xdrv1.Event, cfg.QueueSize),
 		start: time.Now(),
 		wake:  make(chan struct{}, 1),
 	}
+	a.tamper = newTamper(cfg, log.With("component", "tamper"), a.tamperEvent)
+	a.ctx, a.cancel = context.WithCancel(context.Background())
+	return a
 }
+
+// Stop ends Run for a clean exit. Some collectors can block shutdown, so the
+// process exits on its own after a grace period, still counted as clean.
+func (a *Agent) Stop() {
+	a.clearRunningMarker()
+	a.cancel()
+	go func() {
+		time.Sleep(10 * time.Second)
+		a.log.Warn("shutdown took too long, exiting")
+		a.clearRunningMarker()
+		os.Exit(0)
+	}()
+}
+
+// StopAllowed decides whether a termination signal may stop the agent.
+func (a *Agent) StopAllowed(sig os.Signal) bool { return a.tamper.StopAllowed(sig) }
 
 // wakeHeartbeat sends a heartbeat now, so state changes show up quickly.
 func (a *Agent) wakeHeartbeat() {
@@ -75,7 +100,15 @@ func (a *Agent) send(e *xdrv1.Event) {
 	}
 }
 
-func (a *Agent) Run(ctx context.Context) error {
+func (a *Agent) Run() error {
+	ctx := a.ctx
+	defer a.cancel()
+	defer a.clearRunningMarker()
+	a.checkUncleanExit()
+	a.checkUpdate(ctx)
+	// Protection applies from the last known policy, before the console is reachable.
+	go a.tamper.Run(ctx)
+
 	host := HostInfo()
 	var id *Identity
 	for {
@@ -229,10 +262,15 @@ func (a *Agent) heartbeatLoop(ctx context.Context, client xdrv1.AgentServiceClie
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		resp, err := client.Heartbeat(cctx, &xdrv1.HeartbeatRequest{
 			Host: host, Stats: a.stats(), Isolated: a.Isolated(), ContentVersion: a.scanner.Version(),
+			TamperProtected: a.tamper.Applied(),
 		})
 		cancel()
 		if err != nil && ctx.Err() == nil {
 			a.log.Warn("heartbeat failed", "err", err)
+		}
+		if err == nil {
+			a.confirmUpdate()
+			a.tamper.SetPolicy(resp.Tamper)
 		}
 		if err == nil && resp.ContentVersion != a.scanner.Version() {
 			a.updateContent(ctx, client)

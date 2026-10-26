@@ -103,11 +103,37 @@ Open `http://<vm-ip>:8080` and sign in as `admin` with `XDR_ADMIN_PASSWORD`.
 
 ### Uninstall the agent
 
+Use **Uninstall** on the endpoint's page. To remove the agent on the host
+itself, pass the maintenance token from the endpoint's page (needed while
+tamper protection is on):
+
 ```bash
-curl -fsSL http://<vm-ip>:8080/uninstall.sh | sudo bash
+curl -fsSL http://<vm-ip>:8080/uninstall.sh | sudo bash -s -- --token <maintenance token>
 ```
 
 Then revoke or delete the endpoint in the console.
+
+## Fleet management
+
+* **Self-update.** The console offers the agent version it was built with
+  (`XDR_VERSION` in `deploy/.env`). Endpoints that run another version show
+  "update to …"; update one from its page or all online ones from
+  **Endpoints**. The agent downloads the binary over its mTLS connection,
+  checks the SHA-256 the console sent and that the binary runs, swaps it in
+  and restarts. If the new version cannot reach the console within three
+  minutes or fails to start three times, the agent puts the old binary back.
+* **Tamper protection** (on by default, per endpoint). The agent makes its
+  binary, config, CA and unit file immutable, adds `RefuseManualStop=yes` to
+  its unit, ignores SIGTERM unless the host is shutting down, and reports
+  every attempt (ignored signals, a restart after SIGKILL, cleared flags) as
+  an `agent_tamper` event that raises an alert. Commands such as
+  `systemctl stop xdr-agent` or `chattr -i` on its files also alert. Root can
+  still defeat it; the point is that it cannot happen quietly. To work on the
+  agent locally, run `sudo xdr-agent maintenance --token <token>`, which
+  suspends protection for an hour.
+* **Roll-out.** Remote install over SSH (Deploy page) takes many hosts at
+  once. The first SSH host key a host presents is pinned; a changed key
+  fails the install until you forget it on the Deploy page.
 
 ## Development
 
@@ -146,11 +172,12 @@ with `cd web && npm run dev` (it proxies `/api` to `:8080`).
 ## Roadmap
 
 1. **Foundation** (done): telemetry, console, enrollment, installer.
-2. **Detection and response** (this release): Sigma-style rules, YARA
+2. **Detection and response** (done): Sigma-style rules, YARA
    scanning, IOC feeds, alerts, and response actions. eBPF collectors for
    process-attributed file and network events.
-3. **Fleet management**: remote install and uninstall from the console over
-   SSH, agent self-update, tamper protection; roll out to all VMs.
+3. **Fleet management** (this release): remote install and uninstall from
+   the console over SSH, agent self-update with rollback, tamper protection,
+   SSH host key pinning.
 4. **PAM**: just-in-time sudo elevation with approval, session recording,
    privileged account inventory. Then a comparison with Vision One and
    CrowdStrike Falcon, and the Windows agent.

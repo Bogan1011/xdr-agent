@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { XdrEvent, categoryOf, formatBytes, typeLabels } from "../api";
 
 function summary(e: XdrEvent): string {
+  if (e.type === "agent_tamper") return `${e.path}: ${e.args}`;
   switch (categoryOf(e.type)) {
     case "process":
       return e.type === "process_exit" ? `${e.exe} exited (${e.exit_code})` : e.args || e.exe;

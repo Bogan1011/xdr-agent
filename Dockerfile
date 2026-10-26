@@ -22,7 +22,7 @@ RUN mkdir -p /out/downloads && \
         -ldflags "-s -w -X github.com/Bogan1011/xdr-agent/internal/agent.Version=${VERSION}" \
         -o /out/downloads/xdr-agent-linux-$arch ./cmd/xdr-agent; \
     done && \
-    cd /out/downloads && sha256sum xdr-agent-linux-* > SHA256SUMS
+    cd /out/downloads && sha256sum xdr-agent-linux-* > SHA256SUMS && echo "${VERSION}" > VERSION
 
 FROM alpine:3.22
 RUN adduser -D -H -u 10001 xdr && mkdir /data && chown xdr /data
