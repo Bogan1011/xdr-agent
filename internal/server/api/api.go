@@ -1,0 +1,376 @@
+// Package api serves the dashboard's REST API, the dashboard itself, and
+// the public files the agent installer downloads.
+package api
+
+import (
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/Bogan1011/xdr-agent/internal/server/pki"
+	"github.com/Bogan1011/xdr-agent/internal/server/store"
+)
+
+const (
+	sessionCookie = "xdr_session"
+	sessionTTL    = 12 * time.Hour
+)
+
+type Config struct {
+	AdminUser     string
+	AdminPassword string
+	// PublicHost is the address agents use to reach this server.
+	PublicHost   string
+	EnrollPort   int
+	AgentPort    int
+	WebDir       string
+	DownloadsDir string
+}
+
+type API struct {
+	cfg    Config
+	db     *store.Postgres
+	events *store.ClickHouse
+	ca     *pki.CA
+	log    *slog.Logger
+
+	mu       sync.Mutex
+	sessions map[string]time.Time
+}
+
+func New(cfg Config, db *store.Postgres, events *store.ClickHouse, ca *pki.CA, log *slog.Logger) *API {
+	return &API{cfg: cfg, db: db, events: events, ca: ca, log: log, sessions: map[string]time.Time{}}
+}
+
+func (a *API) Handler() http.Handler {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("POST /api/v1/login", a.login)
+	mux.HandleFunc("POST /api/v1/logout", a.logout)
+	mux.HandleFunc("GET /api/v1/me", a.auth(a.me))
+
+	mux.HandleFunc("GET /api/v1/agents", a.auth(a.listAgents))
+	mux.HandleFunc("GET /api/v1/agents/{id}", a.auth(a.getAgent))
+	mux.HandleFunc("POST /api/v1/agents/{id}/revoke", a.auth(a.revokeAgent))
+	mux.HandleFunc("DELETE /api/v1/agents/{id}", a.auth(a.deleteAgent))
+
+	mux.HandleFunc("GET /api/v1/events", a.auth(a.queryEvents))
+	mux.HandleFunc("GET /api/v1/stats", a.auth(a.stats))
+
+	mux.HandleFunc("GET /api/v1/enrollment-tokens", a.auth(a.listTokens))
+	mux.HandleFunc("POST /api/v1/enrollment-tokens", a.auth(a.createToken))
+	mux.HandleFunc("DELETE /api/v1/enrollment-tokens/{id}", a.auth(a.revokeToken))
+	mux.HandleFunc("GET /api/v1/install-info", a.auth(a.installInfo))
+
+	// Public: the installer fetches these before the host has any identity.
+	mux.HandleFunc("GET /pki/ca.crt", a.caCert)
+	mux.HandleFunc("GET /install.sh", a.installScript)
+	mux.HandleFunc("GET /uninstall.sh", a.uninstallScript)
+	if a.cfg.DownloadsDir != "" {
+		mux.Handle("GET /downloads/", http.StripPrefix("/downloads/", http.FileServer(http.Dir(a.cfg.DownloadsDir))))
+	}
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+
+	if a.cfg.WebDir != "" {
+		mux.Handle("GET /", spa(a.cfg.WebDir))
+	}
+	return securityHeaders(mux)
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// spa serves the built dashboard, falling back to index.html for client routes.
+func spa(dir string) http.Handler {
+	fs := http.FileServer(http.Dir(dir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := filepath.Join(dir, filepath.Clean("/"+r.URL.Path))
+		if st, err := os.Stat(p); err != nil || st.IsDir() {
+			http.ServeFile(w, r, filepath.Join(dir, "index.html"))
+			return
+		}
+		fs.ServeHTTP(w, r)
+	})
+}
+
+// --- auth ---
+
+func (a *API) login(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Username, Password string }
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	userOK := subtle.ConstantTimeCompare([]byte(req.Username), []byte(a.cfg.AdminUser)) == 1
+	passOK := subtle.ConstantTimeCompare([]byte(req.Password), []byte(a.cfg.AdminPassword)) == 1
+	if !userOK || !passOK {
+		a.log.Warn("failed dashboard login", "user", req.Username, "remote", r.RemoteAddr)
+		time.Sleep(500 * time.Millisecond)
+		writeErr(w, http.StatusUnauthorized, "invalid username or password")
+		return
+	}
+	var b [32]byte
+	_, _ = rand.Read(b[:])
+	tok := hex.EncodeToString(b[:])
+	a.mu.Lock()
+	now := time.Now()
+	for k, exp := range a.sessions {
+		if now.After(exp) {
+			delete(a.sessions, k)
+		}
+	}
+	a.sessions[tok] = now.Add(sessionTTL)
+	a.mu.Unlock()
+	http.SetCookie(w, &http.Cookie{
+		Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true,
+		SameSite: http.SameSiteStrictMode, Secure: isHTTPS(r), MaxAge: int(sessionTTL.Seconds()),
+	})
+	writeJSON(w, map[string]string{"username": a.cfg.AdminUser})
+}
+
+func (a *API) logout(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie(sessionCookie); err == nil {
+		a.mu.Lock()
+		delete(a.sessions, c.Value)
+		a.mu.Unlock()
+	}
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) me(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]string{"username": a.cfg.AdminUser})
+}
+
+func (a *API) auth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		c, err := r.Cookie(sessionCookie)
+		if err == nil {
+			a.mu.Lock()
+			exp, ok := a.sessions[c.Value]
+			a.mu.Unlock()
+			if ok && time.Now().Before(exp) {
+				// Cookies are SameSite=Strict; requiring JSON on writes also
+				// blocks simple cross-site form posts.
+				if r.Method != http.MethodGet && r.Method != http.MethodDelete && !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+					writeErr(w, http.StatusUnsupportedMediaType, "content type must be application/json")
+					return
+				}
+				next(w, r)
+				return
+			}
+		}
+		writeErr(w, http.StatusUnauthorized, "login required")
+	}
+}
+
+func isHTTPS(r *http.Request) bool {
+	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+}
+
+// --- agents ---
+
+func (a *API) listAgents(w http.ResponseWriter, r *http.Request) {
+	agents, err := a.db.ListAgents(r.Context())
+	if a.fail(w, err) {
+		return
+	}
+	writeJSON(w, agents)
+}
+
+func (a *API) getAgent(w http.ResponseWriter, r *http.Request) {
+	ag, err := a.db.GetAgent(r.Context(), r.PathValue("id"))
+	if a.fail(w, err) {
+		return
+	}
+	writeJSON(w, ag)
+}
+
+func (a *API) revokeAgent(w http.ResponseWriter, r *http.Request) {
+	if a.fail(w, a.db.SetRevoked(r.Context(), r.PathValue("id"), true)) {
+		return
+	}
+	a.log.Info("agent revoked", "agent_id", r.PathValue("id"))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) deleteAgent(w http.ResponseWriter, r *http.Request) {
+	if a.fail(w, a.db.DeleteAgent(r.Context(), r.PathValue("id"))) {
+		return
+	}
+	a.log.Info("agent deleted", "agent_id", r.PathValue("id"))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- events ---
+
+func (a *API) queryEvents(w http.ResponseWriter, r *http.Request) {
+	v := r.URL.Query()
+	q := store.EventQuery{
+		AgentID: v.Get("agent_id"),
+		Search:  strings.TrimSpace(v.Get("q")),
+		SHA256:  v.Get("sha256"),
+	}
+	if t := v.Get("type"); t != "" {
+		q.Types = strings.Split(t, ",")
+	}
+	if p, err := strconv.ParseUint(v.Get("pid"), 10, 32); err == nil {
+		q.PID = uint32(p)
+	}
+	q.Limit, _ = strconv.Atoi(v.Get("limit"))
+	var err error
+	if q.From, err = parseTime(v.Get("from")); err != nil {
+		writeErr(w, http.StatusBadRequest, "from: "+err.Error())
+		return
+	}
+	if q.To, err = parseTime(v.Get("to")); err != nil {
+		writeErr(w, http.StatusBadRequest, "to: "+err.Error())
+		return
+	}
+	events, err := a.events.Query(r.Context(), q)
+	if a.fail(w, err) {
+		return
+	}
+	writeJSON(w, events)
+}
+
+// parseTime accepts RFC 3339 or a relative duration such as "15m" or "24h".
+func parseTime(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	if d, err := time.ParseDuration(s); err == nil {
+		return time.Now().Add(-d), nil
+	}
+	return time.Parse(time.RFC3339, s)
+}
+
+func (a *API) stats(w http.ResponseWriter, r *http.Request) {
+	s, err := a.events.Stats(r.Context(), r.URL.Query().Get("agent_id"))
+	if a.fail(w, err) {
+		return
+	}
+	writeJSON(w, s)
+}
+
+// --- enrollment ---
+
+func (a *API) listTokens(w http.ResponseWriter, r *http.Request) {
+	t, err := a.db.ListEnrollmentTokens(r.Context())
+	if a.fail(w, err) {
+		return
+	}
+	writeJSON(w, t)
+}
+
+func (a *API) createToken(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Description string `json:"description"`
+		TTLHours    int    `json:"ttl_hours"`
+		MaxUses     int    `json:"max_uses"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	if req.TTLHours <= 0 || req.TTLHours > 24*30 {
+		req.TTLHours = 24
+	}
+	if req.MaxUses <= 0 || req.MaxUses > 10000 {
+		req.MaxUses = 1
+	}
+	t, err := a.db.CreateEnrollmentToken(r.Context(), req.Description, time.Duration(req.TTLHours)*time.Hour, req.MaxUses)
+	if a.fail(w, err) {
+		return
+	}
+	writeJSON(w, t)
+}
+
+func (a *API) revokeToken(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	if a.fail(w, a.db.RevokeEnrollmentToken(r.Context(), id)) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) installInfo(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{
+		"ca_sha256":   a.ca.Fingerprint(),
+		"public_host": a.cfg.PublicHost,
+		"enroll_port": a.cfg.EnrollPort,
+		"agent_port":  a.cfg.AgentPort,
+		"base_url":    baseURL(r),
+	})
+}
+
+func baseURL(r *http.Request) string {
+	scheme := "http"
+	if isHTTPS(r) {
+		scheme = "https"
+	}
+	host := r.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		host = r.Host
+	}
+	// The value is rendered into a shell script, so only allow host characters.
+	if !validHost.MatchString(host) {
+		host = "invalid-host"
+	}
+	return scheme + "://" + host
+}
+
+var validHost = regexp.MustCompile(`^[A-Za-z0-9.\-]+(:[0-9]+)?$|^\[[0-9A-Fa-f:.]+\](:[0-9]+)?$`)
+
+func (a *API) caCert(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/x-pem-file")
+	w.Write(a.ca.CertPEM)
+}
+
+// --- helpers ---
+
+func (a *API) fail(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "not found")
+		return true
+	}
+	a.log.Error("api error", "err", err)
+	writeErr(w, http.StatusInternalServerError, "internal error")
+	return true
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeErr(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}

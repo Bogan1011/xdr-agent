@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# XDR agent installer for Linux (systemd).
+#
+#   curl -fsSL {{.BaseURL}}/install.sh | sudo bash -s -- --token <token> --ca-sha256 <fingerprint>
+#
+# Copy the exact command from the dashboard (Settings > Deploy agents); it
+# carries a fresh enrollment token and the CA fingerprint to pin.
+set -euo pipefail
+
+BASE_URL="{{.BaseURL}}"
+SERVER_HOST="{{.PublicHost}}"
+ENROLL_PORT="{{.EnrollPort}}"
+AGENT_PORT="{{.AgentPort}}"
+TOKEN=""
+CA_SHA256=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --token) TOKEN="$2"; shift 2 ;;
+    --ca-sha256) CA_SHA256="$2"; shift 2 ;;
+    --server-host) SERVER_HOST="$2"; shift 2 ;;
+    --base-url) BASE_URL="$2"; shift 2 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+
+die() { echo "xdr-agent install: $*" >&2; exit 1; }
+
+[[ $EUID -eq 0 ]] || die "run as root (sudo)"
+[[ -n "$TOKEN" ]] || die "--token is required"
+[[ -n "$CA_SHA256" ]] || die "--ca-sha256 is required"
+command -v systemctl >/dev/null || die "systemd is required"
+for bin in curl openssl sha256sum; do
+  command -v "$bin" >/dev/null || die "$bin is required"
+done
+
+case "$(uname -m)" in
+  x86_64|amd64) ARCH=amd64 ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  *) die "unsupported architecture $(uname -m)" ;;
+esac
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+echo "==> Downloading CA certificate"
+curl -fsSL "$BASE_URL/pki/ca.crt" -o "$TMP/ca.crt"
+GOT="$(openssl x509 -in "$TMP/ca.crt" -outform der | sha256sum | cut -d' ' -f1)"
+[[ "${GOT,,}" == "${CA_SHA256,,}" ]] || die "CA fingerprint mismatch (got $GOT); refusing to install"
+
+echo "==> Downloading agent ($ARCH)"
+curl -fsSL "$BASE_URL/downloads/xdr-agent-linux-$ARCH" -o "$TMP/xdr-agent"
+curl -fsSL "$BASE_URL/downloads/SHA256SUMS" -o "$TMP/SHA256SUMS"
+WANT="$(grep " xdr-agent-linux-$ARCH\$" "$TMP/SHA256SUMS" | cut -d' ' -f1)"
+GOT="$(sha256sum "$TMP/xdr-agent" | cut -d' ' -f1)"
+[[ -n "$WANT" && "$WANT" == "$GOT" ]] || die "agent checksum mismatch"
+
+if systemctl is-active --quiet xdr-agent; then
+  systemctl stop xdr-agent
+fi
+
+install -m 0755 "$TMP/xdr-agent" /usr/local/bin/xdr-agent
+install -d -m 0700 /etc/xdr-agent /var/lib/xdr-agent
+install -m 0644 "$TMP/ca.crt" /etc/xdr-agent/ca.crt
+
+# Keep an existing enrollment on reinstall; a new token is only used if the
+# host has no identity yet.
+cat > /etc/xdr-agent/agent.yaml <<EOF
+server: ${SERVER_HOST}:${AGENT_PORT}
+enroll_server: ${SERVER_HOST}:${ENROLL_PORT}
+ca_file: /etc/xdr-agent/ca.crt
+enrollment_token: ${TOKEN}
+state_dir: /var/lib/xdr-agent
+EOF
+chmod 0600 /etc/xdr-agent/agent.yaml
+
+cat > /etc/systemd/system/xdr-agent.service <<'EOF'
+[Unit]
+Description=XDR endpoint agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/xdr-agent --config /etc/xdr-agent/agent.yaml
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+Nice=5
+OOMScoreAdjust=-500
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now xdr-agent
+echo "==> xdr-agent installed and started. Logs: journalctl -u xdr-agent -f"

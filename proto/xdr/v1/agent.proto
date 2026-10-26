@@ -1,0 +1,126 @@
+syntax = "proto3";
+
+package xdr.v1;
+
+option go_package = "github.com/Bogan1011/xdr-agent/gen/xdr/v1;xdrv1";
+
+// EnrollmentService runs on a TLS port without client certificates. An agent
+// presents a one-time enrollment token and a CSR and receives a signed client
+// certificate used for every later call.
+service EnrollmentService {
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+}
+
+// AgentService requires mTLS. The agent identity is taken from the client
+// certificate's common name, never from the request body.
+service AgentService {
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // Unary per batch so every batch is acknowledged and can be retried.
+  rpc SendEvents(EventBatch) returns (SendEventsResponse);
+}
+
+message HostInfo {
+  string hostname = 1;
+  string os = 2;
+  string os_version = 3;
+  string kernel = 4;
+  string arch = 5;
+  repeated string ip_addresses = 6;
+  string agent_version = 7;
+  string machine_id = 8;
+}
+
+message EnrollRequest {
+  string enrollment_token = 1;
+  bytes csr_pem = 2;
+  HostInfo host = 3;
+}
+
+message EnrollResponse {
+  string agent_id = 1;
+  bytes certificate_pem = 2;
+  bytes ca_pem = 3;
+}
+
+message HeartbeatRequest {
+  HostInfo host = 1;
+  AgentStats stats = 2;
+}
+
+message AgentStats {
+  uint64 events_sent = 1;
+  uint64 events_dropped = 2;
+  uint64 uptime_seconds = 3;
+  double cpu_percent = 4;
+  uint64 rss_bytes = 5;
+}
+
+message HeartbeatResponse {
+  int64 server_time_unix = 1;
+}
+
+message EventBatch {
+  repeated Event events = 1;
+}
+
+message SendEventsResponse {
+  uint64 accepted = 1;
+}
+
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_PROCESS_EXEC = 1;
+  EVENT_TYPE_PROCESS_EXIT = 2;
+  EVENT_TYPE_FILE_CREATE = 3;
+  EVENT_TYPE_FILE_MODIFY = 4;
+  EVENT_TYPE_FILE_DELETE = 5;
+  EVENT_TYPE_FILE_RENAME = 6;
+  EVENT_TYPE_FILE_ATTRIB = 7;
+  EVENT_TYPE_NET_CONNECT = 8;
+  EVENT_TYPE_NET_LISTEN = 9;
+}
+
+message Event {
+  string id = 1;
+  int64 timestamp_unix_nano = 2;
+  EventType type = 3;
+  oneof payload {
+    ProcessEvent process = 10;
+    FileEvent file = 11;
+    NetworkEvent network = 12;
+  }
+}
+
+message ProcessEvent {
+  uint32 pid = 1;
+  uint32 ppid = 2;
+  uint32 uid = 3;
+  uint32 gid = 4;
+  string user = 5;
+  string exe = 6;
+  repeated string args = 7;
+  string cwd = 8;
+  string sha256 = 9;
+  string parent_exe = 10;
+  int32 exit_code = 11;
+}
+
+message FileEvent {
+  string path = 1;
+  string old_path = 2;
+  uint64 size = 3;
+  uint32 mode = 4;
+  uint32 uid = 5;
+  string sha256 = 6;
+}
+
+message NetworkEvent {
+  string protocol = 1;
+  string local_addr = 2;
+  uint32 local_port = 3;
+  string remote_addr = 4;
+  uint32 remote_port = 5;
+  uint32 pid = 6;
+  string exe = 7;
+  uint32 uid = 8;
+}

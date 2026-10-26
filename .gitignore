@@ -1,0 +1,4 @@
+/bin/
+deploy/.env
+web/node_modules/
+web/dist/

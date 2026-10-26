@@ -1,0 +1,57 @@
+# Single-VM deployment: the console, its databases, and the endpoints for agents.
+# Usage: cp .env.example .env, edit it, then `docker compose up -d --build`.
+name: xdr
+
+services:
+  server:
+    build:
+      context: ..
+      args:
+        VERSION: ${XDR_VERSION:-0.1.0}
+    restart: unless-stopped
+    depends_on: [postgres, clickhouse]
+    environment:
+      XDR_PUBLIC_HOST: ${XDR_PUBLIC_HOST:?set XDR_PUBLIC_HOST in .env}
+      XDR_SERVER_NAMES: ${XDR_SERVER_NAMES:-}
+      XDR_ADMIN_USER: ${XDR_ADMIN_USER:-admin}
+      XDR_ADMIN_PASSWORD: ${XDR_ADMIN_PASSWORD:?set XDR_ADMIN_PASSWORD in .env}
+      XDR_POSTGRES_URL: postgres://xdr:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/xdr
+      XDR_CLICKHOUSE_ADDR: clickhouse:9000
+      XDR_CLICKHOUSE_DB: xdr
+      XDR_CLICKHOUSE_USER: xdr
+      XDR_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD}
+      XDR_EVENT_TTL_DAYS: ${XDR_EVENT_TTL_DAYS:-30}
+    ports:
+      - "${XDR_HTTP_PORT:-8080}:8080"   # dashboard, API, installer downloads
+      - "8443:8443"                     # agent enrollment (TLS)
+      - "8444:8444"                     # agent telemetry (mutual TLS)
+    volumes:
+      - server-data:/data
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: xdr
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: xdr
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: xdr
+      CLICKHOUSE_USER: xdr
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "0"
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes:
+      - ch-data:/var/lib/clickhouse
+
+volumes:
+  server-data:
+  pg-data:
+  ch-data:
