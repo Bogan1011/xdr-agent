@@ -3,9 +3,12 @@
 //! and fanotify prevention are ported next.
 
 pub mod auth;
+pub mod container;
+pub mod credaccess;
 pub mod dns;
 pub mod file;
 pub mod host;
+pub mod memory;
 pub mod network;
 pub mod persistence;
 pub mod process;
@@ -56,6 +59,13 @@ impl Platform for Linux {
             }),
             Box::new(auth::Auth),
             Box::new(dns::Dns),
+            Box::new(memory::Memory {
+                interval: std::time::Duration::from_secs(30),
+            }),
+            Box::new(credaccess::CredentialAccess),
+            Box::new(container::Containers {
+                interval: std::time::Duration::from_secs(10),
+            }),
             Box::new(persistence::Persistence {
                 hasher: self.hasher.clone(),
             }),

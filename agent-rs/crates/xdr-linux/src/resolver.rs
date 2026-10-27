@@ -197,6 +197,13 @@ impl ProcessResolver for Resolver {
             _ => self.lookup(pid, ts, 0),
         })
     }
+
+    fn container(&self, e: &pb::Event) -> Option<pb::ContainerContext> {
+        match actor_pid(e) {
+            0 => None,
+            pid => crate::container::of_pid(pid),
+        }
+    }
 }
 
 #[cfg(test)]

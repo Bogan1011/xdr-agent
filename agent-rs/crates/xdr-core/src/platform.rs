@@ -19,6 +19,11 @@ pub trait Collector: Send {
 /// stable process_guid and its parent.
 pub trait ProcessResolver: Send + Sync {
     fn context(&self, event: &pb::Event) -> Option<pb::ProcessContext>;
+
+    /// The container the event's process runs in; None on the host.
+    fn container(&self, _event: &pb::Event) -> Option<pb::ContainerContext> {
+        None
+    }
 }
 
 /// CPU seconds used and resident memory of the agent itself.

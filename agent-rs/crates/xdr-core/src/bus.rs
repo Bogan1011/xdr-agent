@@ -165,6 +165,9 @@ pub fn envelope(e: &mut pb::Event, agent_id: &str, resolver: &dyn ProcessResolve
     if e.process_context.is_none() {
         e.process_context = resolver.context(e);
     }
+    if e.container.is_none() {
+        e.container = resolver.container(e);
+    }
 }
 
 /// Telemetry priority from docs/telemetry.md: injection, credential and
@@ -174,7 +177,7 @@ pub fn priority_for(t: EventType) -> Priority {
     match t {
         ExecBlocked | YaraMatch | AgentTamper | ProcessInjection | ProcessAccess | KernelModule => Priority::Critical,
         FimChange | WebReputation | Intrusion | DeviceControl | AppControl | Persistence | MemoryProtect
-        | KernelChange | AuthFailed | Sudo | Su | AccountChange | FileOpen | ProcessExec => Priority::High,
+        | KernelChange | AuthFailed | Sudo | Su | AccountChange | ProcessExec => Priority::High,
         FileCreate | FileModify | FileDelete | FileRename | FileAttrib | NetListen | Inventory => Priority::Low,
         _ => Priority::Normal,
     }
