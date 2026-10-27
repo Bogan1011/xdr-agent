@@ -8,6 +8,8 @@ pub mod credaccess;
 pub mod dns;
 pub mod file;
 pub mod host;
+pub mod inventory;
+pub mod kernel;
 pub mod memory;
 pub mod network;
 pub mod persistence;
@@ -63,6 +65,13 @@ impl Platform for Linux {
                 interval: std::time::Duration::from_secs(30),
             }),
             Box::new(credaccess::CredentialAccess),
+            Box::new(kernel::Kernel {
+                interval: std::time::Duration::from_secs(15),
+            }),
+            Box::new(inventory::Inventory {
+                interval: std::time::Duration::from_secs(6 * 3600),
+                state: cfg.state_path("inventory.json"),
+            }),
             Box::new(container::Containers {
                 interval: std::time::Duration::from_secs(10),
             }),

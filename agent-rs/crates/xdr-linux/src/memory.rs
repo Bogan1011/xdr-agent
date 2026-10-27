@@ -281,6 +281,7 @@ mod live {
         });
         std::thread::sleep(Duration::from_secs(2));
         let _ = child.kill();
+        let _ = child.wait();
         let mut found = false;
         while let Ok(e) = rx.try_recv() {
             let t = e.r#type();

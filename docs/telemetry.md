@@ -18,14 +18,14 @@ Fields are only ever appended to the proto and the table, never renumbered.
 | 3b | User/group, euid, loginuid, tty, session, capabilities, namespaces, exe owner/mode, run time | process payload + context | /proc | done (0.10) |
 | 4 | Network connect/accept/listen + process | `net_connect`, `net_accept`, `net_listen`; TCP+UDP, direction, netns | /proc/net + socket inodes | done (0.10); eBPF for short-lived connections comes with the eBPF port |
 | 5 | File create/write/delete/rename/attrib | `file_*`; inode, device, owner, gid, mount, fs type, hashes | inotify (configured paths) | done (0.10); writer process via eBPF port |
-| 6 | DNS query/response + process | `dns_query` | packet socket on port 53 | PR 2 |
-| 7 | SSH/login/sudo/su/account changes | `auth_login`, `auth_logout`, `auth_failed`, `sudo`, `su`, `account_change` | journald / auth.log | PR 2 |
-| 8 | Persistence | `persistence` (cron, systemd, ssh keys, sudoers, profiles, ld.so.preload, udev, modules-load, sysctl.d, rc.local, at) | inotify on fixed locations, line diff | PR 2 |
-| 9 | Memory / process access | `process_access`, `memory_protect`, `process_injection` | /proc (TracerPid, maps, environ, memfd) | PR 3 |
-| 10 | Container / Kubernetes context | `container` on every event, `container_start/stop` | cgroup + runtime metadata | PR 3 |
-| 11 | Kernel signals | `kernel_module`, `kernel_change` (sysctl, mounts, taint) | /proc | PR 3 |
-| 12 | Inventory | `inventory` (system, packages, interfaces, mounts), on change only | /proc, dpkg/rpm | PR 3 |
-| - | Sensitive file open (credential access) | `file_open` | fanotify | PR 3 |
+| 6 | DNS query/response + process | `dns_query` | packet socket with a port-53 BPF filter, socket → process | done (0.10); TCP DNS and DoH not seen |
+| 7 | SSH/login/sudo/su/account changes | `auth_login`, `auth_logout`, `auth_failed`, `sudo`, `su`, `account_change` | journald, else auth.log/secure | done (0.10) |
+| 8 | Persistence | `persistence` (cron, systemd, ssh keys, sudoers, profiles, ld.so.preload, udev, modules-load, sysctl.d, rc.local, at) | inotify on fixed locations, line diff (secrets not diffed) | done (0.10); writer process via eBPF port |
+| 9 | Memory / process access | `process_access`, `memory_protect`, `process_injection` | /proc every 30 s (TracerPid, maps, environ, exe) | done (0.10); /proc/pid/mem and process_vm_writev need eBPF |
+| 10 | Container / Kubernetes context | `container` on every event, `container_start/stop` | cgroup + Docker/containerd/CRI-O state | done (0.10) |
+| 11 | Kernel signals | `kernel_module`, `kernel_change` (sysctl, mounts, taint) | /proc every 15 s | done (0.10) |
+| 12 | Inventory | `inventory` (system, packages, interfaces, mounts), on change only | /proc, getifaddrs, dpkg/rpm; every 6 h | done (0.10) |
+| - | Sensitive file open (credential access) | `file_open` | fanotify open permission (answered at once) on shadow, sudoers, SSH private keys | done (0.10) |
 
 ## Envelope
 
@@ -40,8 +40,8 @@ instead of being repeated on every event, as the spec recommends.
 
 | Priority | Event types |
 |---|---|
-| critical | exec_blocked, yara_match, agent_tamper, process_injection, process_access, kernel_module |
-| high | process_exec, persistence, memory_protect, kernel_change, auth_failed, sudo, su, account_change, file_open, policy module events |
+| critical | exec_blocked, yara_match, agent_tamper, process_injection, process_access, kernel_module, file_open (credential access) |
+| high | process_exec, persistence, memory_protect, kernel_change, auth_failed, sudo, su, account_change, policy module events |
 | normal | process_exit, network, DNS, logins |
 | low | file create/modify/delete/rename/attrib, net_listen, inventory |
 
