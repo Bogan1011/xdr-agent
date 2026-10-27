@@ -72,7 +72,7 @@ const about: Record<ModuleKey, string> = {
   intrusion_prevention: "Detects SSH brute force and bans the attacking address for a while.",
   device_control: "Controls USB storage devices (USB sticks, external disks).",
   activity_monitoring: "Chooses which activity the agent records for threat hunting and behaviour rules.",
-  application_control: "Stops or reports programs you list by path or SHA-256.",
+  application_control: "Stops or reports programs by path or SHA-256, locks a server down to an allow-list, and stops scripts run from temp folders.",
 };
 
 export function ModuleForm({ m, p, set, intel }: { m: ModuleKey; p: PreventionPolicy; set: Set; intel?: Intel }) {
@@ -265,6 +265,9 @@ function Activity({ p, set }: { p: PreventionPolicy; set: Set }) {
   );
 }
 
+const DEFAULT_ALLOWED = ["/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/opt", "/snap", "/etc", "/var/lib/docker", "/var/lib/containerd", "/var/lib/snapd"];
+const DEFAULT_SCRIPT_DIRS = ["/tmp", "/var/tmp", "/dev/shm"];
+
 function AppControl({ p, set }: { p: PreventionPolicy; set: Set }) {
   const ac = p.application_control;
   const up = (v: Partial<typeof ac>) => set({ ...p, application_control: { ...ac, ...v } });
@@ -282,6 +285,30 @@ function AppControl({ p, set }: { p: PreventionPolicy; set: Set }) {
         <ListField label="Blocked paths (prefixes or globs)" value={ac.blocked_paths} placeholder={"/tmp/*\n/opt/games"} onChange={(blocked_paths) => up({ blocked_paths })} />
         <ListField label="Blocked SHA-256 hashes" value={ac.blocked_sha256} onChange={(blocked_sha256) => up({ blocked_sha256 })} />
       </div>
+      <Check
+        checked={ac.lockdown}
+        onChange={(lockdown) => up({ lockdown, allowed_paths: lockdown && !ac.allowed_paths?.length ? DEFAULT_ALLOWED : ac.allowed_paths })}
+      >
+        Lockdown: only allow-listed programs may run
+      </Check>
+      {ac.lockdown && (
+        <>
+          <div className="grid-2">
+            <ListField label="Allowed paths" value={ac.allowed_paths ?? []} onChange={(allowed_paths) => up({ allowed_paths })} />
+            <ListField label="Allowed SHA-256 hashes" value={ac.allowed_sha256 ?? []} onChange={(allowed_sha256) => up({ allowed_sha256 })} />
+          </div>
+          <div className="muted small">Start with "Alert only" for a few days and check the Application control events before switching to block. The block lists still win over the allow-list.</div>
+        </>
+      )}
+      <Check
+        checked={ac.block_scripts}
+        onChange={(block_scripts) => up({ block_scripts, script_paths: block_scripts && !ac.script_paths?.length ? DEFAULT_SCRIPT_DIRS : ac.script_paths })}
+      >
+        Stop scripts (bash, python, perl...) run from temp folders
+      </Check>
+      {ac.block_scripts && (
+        <ListField label="Script folders" rows={3} value={ac.script_paths ?? []} onChange={(script_paths) => up({ script_paths })} />
+      )}
     </>
   );
 }

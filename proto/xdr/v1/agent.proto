@@ -172,6 +172,15 @@ message ApplicationControlPolicy {
   // Path prefixes, or globs when they contain * ? or [.
   repeated string blocked_paths = 3;
   repeated string blocked_sha256 = 4;
+  // Lockdown: only files under allowed_paths or with an allowed hash may run.
+  // The block lists still win over the allow-list.
+  bool lockdown = 5;
+  repeated string allowed_paths = 6;
+  repeated string allowed_sha256 = 7;
+  // Stop shells and script interpreters (bash, python, perl...) from running
+  // script files that sit under script_paths, e.g. /tmp.
+  bool block_scripts = 8;
+  repeated string script_paths = 9;
 }
 
 // File integrity monitoring: a baseline of hashes, owners and modes for the
@@ -227,6 +236,7 @@ message PreventionState {
   bool device_control = 13;
   uint32 blocked_devices = 14;
   bool app_control = 15;
+  bool script_blocking = 16;
 }
 
 message PamPolicy {

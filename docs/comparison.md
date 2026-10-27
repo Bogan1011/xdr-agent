@@ -1,6 +1,6 @@
 # How we compare: Trend Micro Vision One and CrowdStrike Falcon
 
-Status as of release 0.6.0 (Linux agent, single-tenant console). The
+Status as of release 0.7.0 (Linux agent, single-tenant console). The
 competitor columns describe what their commercial platforms offer in
 general; exact features depend on the licence tier, and both vendors change
 their line-ups often, so check current datasheets before quoting this
@@ -26,7 +26,7 @@ Legend: ✅ have it · 🟡 partial · ❌ not yet
 | Exploit / memory protection | ❌ | ✅ | ✅ |
 | Host firewall, IPS / virtual patching | 🟡 host firewall (nftables), SSH brute-force IPS, no virtual patching | ✅ (Deep Security heritage) | 🟡 firewall management |
 | File integrity monitoring | ✅ baselines, drift alerts, accept-as-baseline | ✅ | ✅ (FileVantage) |
-| Application control | 🟡 block list by path/hash, no allow-list lockdown | ✅ | 🟡 |
+| Application control | ✅ block lists, allow-list lockdown, scripts from temp folders stopped | ✅ | 🟡 |
 | Device control (USB) | 🟡 USB storage allow/block with exceptions, no read-only | ✅ | ✅ |
 | **Detection and investigation** | | | |
 | Process, file, network telemetry | ✅ | ✅ | ✅ |
@@ -83,11 +83,12 @@ Legend: ✅ have it · 🟡 partial · ❌ not yet
 3. **Console hardening**: HTTPS by default, multiple users with roles,
    SSO (OIDC), audit log of admin actions, approval by a second person for
    PAM grants. Deep Security-style admin-set agent password (backlog).
-4. **Prevention depth**: policies with eight modules shipped in 0.6.0.
-   Next: machine-learning blocking, application control allow-lists
-   (lockdown), IPS rules beyond SSH brute force / virtual patching, URL
-   categories for web reputation, read-only USB, and blocking scripts run
-   through an interpreter (fanotify only sees direct execs).
+4. **Prevention depth**: policies with eight modules shipped in 0.6.0;
+   0.7.0 adds application control lockdown (allow-list) and stops
+   interpreters running scripts from temp folders. Next: machine-learning
+   blocking, IPS rules beyond SSH brute force / virtual patching, URL
+   categories for web reputation, read-only USB. Script blocking does not
+   cover code piped to a shell (`curl | bash`).
 5. **Vulnerability and posture**: package inventory matched against CVE
    feeds, CIS-style configuration checks, a per-host risk score.
 6. **Live response**: the remote shell and live view shipped in 0.5.0.

@@ -272,6 +272,8 @@ with `cd web && npm run dev` (it proxies `/api` to `:8080`).
    with eight modules: anti-malware, web reputation, file integrity,
    firewall, intrusion prevention, device control, activity monitoring and
    application control.
-7. The remaining Linux gaps in the comparison (investigation, console
+7. **Lockdown** (0.7.0): application control allow-list mode and blocking
+   of scripts run by shells and interpreters from temp folders.
+8. The remaining Linux gaps in the comparison (investigation, console
    hardening, vulnerability and posture, live response), then the Windows
    agent.

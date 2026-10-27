@@ -1162,6 +1162,15 @@ type ApplicationControlPolicy struct {
 	// Path prefixes, or globs when they contain * ? or [.
 	BlockedPaths  []string `protobuf:"bytes,3,rep,name=blocked_paths,json=blockedPaths,proto3" json:"blocked_paths,omitempty"`
 	BlockedSha256 []string `protobuf:"bytes,4,rep,name=blocked_sha256,json=blockedSha256,proto3" json:"blocked_sha256,omitempty"`
+	// Lockdown: only files under allowed_paths or with an allowed hash may run.
+	// The block lists still win over the allow-list.
+	Lockdown      bool     `protobuf:"varint,5,opt,name=lockdown,proto3" json:"lockdown,omitempty"`
+	AllowedPaths  []string `protobuf:"bytes,6,rep,name=allowed_paths,json=allowedPaths,proto3" json:"allowed_paths,omitempty"`
+	AllowedSha256 []string `protobuf:"bytes,7,rep,name=allowed_sha256,json=allowedSha256,proto3" json:"allowed_sha256,omitempty"`
+	// Stop shells and script interpreters (bash, python, perl...) from running
+	// script files that sit under script_paths, e.g. /tmp.
+	BlockScripts  bool     `protobuf:"varint,8,opt,name=block_scripts,json=blockScripts,proto3" json:"block_scripts,omitempty"`
+	ScriptPaths   []string `protobuf:"bytes,9,rep,name=script_paths,json=scriptPaths,proto3" json:"script_paths,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1220,6 +1229,41 @@ func (x *ApplicationControlPolicy) GetBlockedPaths() []string {
 func (x *ApplicationControlPolicy) GetBlockedSha256() []string {
 	if x != nil {
 		return x.BlockedSha256
+	}
+	return nil
+}
+
+func (x *ApplicationControlPolicy) GetLockdown() bool {
+	if x != nil {
+		return x.Lockdown
+	}
+	return false
+}
+
+func (x *ApplicationControlPolicy) GetAllowedPaths() []string {
+	if x != nil {
+		return x.AllowedPaths
+	}
+	return nil
+}
+
+func (x *ApplicationControlPolicy) GetAllowedSha256() []string {
+	if x != nil {
+		return x.AllowedSha256
+	}
+	return nil
+}
+
+func (x *ApplicationControlPolicy) GetBlockScripts() bool {
+	if x != nil {
+		return x.BlockScripts
+	}
+	return false
+}
+
+func (x *ApplicationControlPolicy) GetScriptPaths() []string {
+	if x != nil {
+		return x.ScriptPaths
 	}
 	return nil
 }
@@ -1468,6 +1512,7 @@ type PreventionState struct {
 	DeviceControl         bool   `protobuf:"varint,13,opt,name=device_control,json=deviceControl,proto3" json:"device_control,omitempty"`
 	BlockedDevices        uint32 `protobuf:"varint,14,opt,name=blocked_devices,json=blockedDevices,proto3" json:"blocked_devices,omitempty"`
 	AppControl            bool   `protobuf:"varint,15,opt,name=app_control,json=appControl,proto3" json:"app_control,omitempty"`
+	ScriptBlocking        bool   `protobuf:"varint,16,opt,name=script_blocking,json=scriptBlocking,proto3" json:"script_blocking,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -1603,6 +1648,13 @@ func (x *PreventionState) GetBlockedDevices() uint32 {
 func (x *PreventionState) GetAppControl() bool {
 	if x != nil {
 		return x.AppControl
+	}
+	return false
+}
+
+func (x *PreventionState) GetScriptBlocking() bool {
+	if x != nil {
+		return x.ScriptBlocking
 	}
 	return false
 }
@@ -4475,12 +4527,17 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"\x18ActivityMonitoringPolicy\x12\x18\n" +
 	"\aprocess\x18\x01 \x01(\bR\aprocess\x12\x12\n" +
 	"\x04file\x18\x02 \x01(\bR\x04file\x12\x18\n" +
-	"\anetwork\x18\x03 \x01(\bR\anetwork\"\x96\x01\n" +
+	"\anetwork\x18\x03 \x01(\bR\anetwork\"\xc6\x02\n" +
 	"\x18ApplicationControlPolicy\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x14\n" +
 	"\x05block\x18\x02 \x01(\bR\x05block\x12#\n" +
 	"\rblocked_paths\x18\x03 \x03(\tR\fblockedPaths\x12%\n" +
-	"\x0eblocked_sha256\x18\x04 \x03(\tR\rblockedSha256\"\x80\x01\n" +
+	"\x0eblocked_sha256\x18\x04 \x03(\tR\rblockedSha256\x12\x1a\n" +
+	"\blockdown\x18\x05 \x01(\bR\blockdown\x12#\n" +
+	"\rallowed_paths\x18\x06 \x03(\tR\fallowedPaths\x12%\n" +
+	"\x0eallowed_sha256\x18\a \x03(\tR\rallowedSha256\x12#\n" +
+	"\rblock_scripts\x18\b \x01(\bR\fblockScripts\x12!\n" +
+	"\fscript_paths\x18\t \x03(\tR\vscriptPaths\"\x80\x01\n" +
 	"\tFimPolicy\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x14\n" +
 	"\x05paths\x18\x02 \x03(\tR\x05paths\x12\x18\n" +
@@ -4496,7 +4553,7 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"\bprotocol\x18\x03 \x01(\tR\bprotocol\x12\x14\n" +
 	"\x05ports\x18\x04 \x01(\tR\x05ports\x12\x12\n" +
 	"\x04cidr\x18\x05 \x01(\tR\x04cidr\x12\x18\n" +
-	"\acomment\x18\x06 \x01(\tR\acomment\"\xd1\x04\n" +
+	"\acomment\x18\x06 \x01(\tR\acomment\"\xfa\x04\n" +
 	"\x0fPreventionState\x12#\n" +
 	"\rexec_blocking\x18\x01 \x01(\bR\fexecBlocking\x12%\n" +
 	"\x0eblocked_hashes\x18\x02 \x01(\rR\rblockedHashes\x12\x1d\n" +
@@ -4516,7 +4573,8 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"\x0edevice_control\x18\r \x01(\bR\rdeviceControl\x12'\n" +
 	"\x0fblocked_devices\x18\x0e \x01(\rR\x0eblockedDevices\x12\x1f\n" +
 	"\vapp_control\x18\x0f \x01(\bR\n" +
-	"appControl\"3\n" +
+	"appControl\x12'\n" +
+	"\x0fscript_blocking\x18\x10 \x01(\bR\x0escriptBlocking\"3\n" +
 	"\tPamPolicy\x12&\n" +
 	"\x0frecord_all_sudo\x18\x01 \x01(\bR\rrecordAllSudo\"b\n" +
 	"\fTamperPolicy\x12\x18\n" +

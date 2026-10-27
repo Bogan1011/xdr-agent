@@ -14,6 +14,7 @@ import (
 	"time"
 
 	xdrv1 "github.com/Bogan1011/xdr-agent/gen/xdr/v1"
+	"github.com/Bogan1011/xdr-agent/internal/policy"
 )
 
 type sink struct {
@@ -250,6 +251,77 @@ func TestAppControlBlocking(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	evs := s.take()
 	if len(evs) != 1 || evs[0].Type != xdrv1.EventType_EVENT_TYPE_APP_CONTROL || evs[0].GetPolicy().Exe != blocked {
+		t.Fatalf("events = %v", evs)
+	}
+
+	// Lockdown: only the allow-list runs.
+	stranger := filepath.Join(dir, "stranger")
+	os.WriteFile(stranger, raw, 0o755)
+	b.SetRules(false, &xdrv1.ApplicationControlPolicy{Enabled: true, Block: true, Lockdown: true,
+		AllowedPaths: append(append([]string{}, policy.DefaultAllowedPaths...), other)})
+	if err := exec.Command(other).Run(); err != nil {
+		t.Fatalf("allow-listed binary failed: %v", err)
+	}
+	if err := exec.Command("/bin/true").Run(); err != nil {
+		t.Fatalf("system binary failed: %v", err)
+	}
+	if err := exec.Command(stranger).Run(); err == nil {
+		t.Fatal("binary off the allow-list ran")
+	}
+	time.Sleep(100 * time.Millisecond)
+	if evs := s.take(); len(evs) != 1 || !strings.Contains(evs[0].GetPolicy().Detail, "lockdown") {
+		t.Fatalf("events = %v", evs)
+	}
+}
+
+// TestScriptBlocking stops bash running a script from a script folder but
+// not inline commands or scripts elsewhere.
+func TestScriptBlocking(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("no bash")
+	}
+	drop, safe := t.TempDir(), t.TempDir()
+	os.MkdirAll(filepath.Join(drop, "sub"), 0o755)
+	for _, d := range []string{drop, filepath.Join(drop, "sub"), safe} {
+		os.WriteFile(filepath.Join(d, "x.sh"), []byte("exit 0\n"), 0o755)
+	}
+
+	s := &sink{}
+	b := NewScriptBlocker(slog.Default(), s.emit)
+	b.SetPolicy(&xdrv1.ApplicationControlPolicy{Enabled: true, Block: true, BlockScripts: true, ScriptPaths: []string{drop}})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { b.Run(ctx); close(done) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for !b.Covers(filepath.Join(drop, "sub")) {
+		if _, _, err := b.Status(); err != "" {
+			t.Skipf("fanotify unavailable: %s", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("script blocker did not start")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := exec.Command("bash", filepath.Join(safe, "x.sh")).Run(); err != nil {
+		t.Fatalf("script outside the folders failed: %v", err)
+	}
+	if err := exec.Command("bash", "-c", "cat "+filepath.Join(drop, "x.sh")+" >/dev/null").Run(); err != nil {
+		t.Fatalf("reading a script failed: %v", err)
+	}
+	for _, sc := range []string{filepath.Join(drop, "x.sh"), filepath.Join(drop, "sub", "x.sh")} {
+		if err := exec.Command("bash", sc).Run(); err == nil {
+			t.Fatalf("%s ran", sc)
+		}
+	}
+	time.Sleep(100 * time.Millisecond)
+	if evs := s.take(); len(evs) != 2 || evs[0].Type != xdrv1.EventType_EVENT_TYPE_APP_CONTROL {
 		t.Fatalf("events = %v", evs)
 	}
 }
