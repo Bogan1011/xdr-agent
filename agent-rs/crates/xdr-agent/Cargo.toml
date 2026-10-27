@@ -1,0 +1,17 @@
+[package]
+name = "xdr-agent"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "xdr-agent-rs"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+xdr-core.workspace = true
+xdr-linux.workspace = true

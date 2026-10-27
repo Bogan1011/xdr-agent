@@ -292,6 +292,7 @@ func (a *API) queryEvents(w http.ResponseWriter, r *http.Request) {
 	if t := v.Get("type"); t != "" {
 		q.Types = strings.Split(t, ",")
 	}
+	q.ProcessGUID = v.Get("process_guid")
 	if p, err := strconv.ParseUint(v.Get("pid"), 10, 32); err == nil {
 		q.PID = uint32(p)
 	}

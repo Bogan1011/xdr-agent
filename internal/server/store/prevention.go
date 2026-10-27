@@ -111,18 +111,19 @@ type Policy struct {
 	IsDefault   bool            `json:"is_default"`
 	Policy      json.RawMessage `json:"policy,omitempty"`
 	Endpoints   int             `json:"endpoints"`
+	Version     int64           `json:"version"`
 	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
 // effectivePolicy is the policy id an agents row follows.
 const effectivePolicy = `COALESCE(agents.policy_id, (SELECT id FROM policies WHERE is_default))`
 
-const policyCols = `p.id, p.name, p.description, p.is_default, p.policy, p.updated_at,
+const policyCols = `p.id, p.name, p.description, p.is_default, p.policy, p.updated_at, p.version,
 	(SELECT count(*) FROM agents WHERE NOT revoked AND ` + effectivePolicy + ` = p.id)`
 
 func scanPolicy(row pgx.Row) (*Policy, error) {
 	pol := &Policy{}
-	err := row.Scan(&pol.ID, &pol.Name, &pol.Description, &pol.IsDefault, &pol.Policy, &pol.UpdatedAt, &pol.Endpoints)
+	err := row.Scan(&pol.ID, &pol.Name, &pol.Description, &pol.IsDefault, &pol.Policy, &pol.UpdatedAt, &pol.Version, &pol.Endpoints)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -166,7 +167,7 @@ func (p *Postgres) CreatePolicy(ctx context.Context, name, desc string, raw []by
 }
 
 func (p *Postgres) UpdatePolicy(ctx context.Context, id int64, name, desc string, raw []byte) error {
-	tag, err := p.pool.Exec(ctx, `UPDATE policies SET name=$2, description=$3, policy=$4, updated_at=now() WHERE id=$1`,
+	tag, err := p.pool.Exec(ctx, `UPDATE policies SET name=$2, description=$3, policy=$4, updated_at=now(), version=version+1 WHERE id=$1`,
 		id, name, desc, raw)
 	if err == nil && tag.RowsAffected() == 0 {
 		return ErrNotFound
@@ -211,9 +212,9 @@ func (p *Postgres) PolicyEndpoints(ctx context.Context, id int64) ([]*Agent, err
 func (p *Postgres) AgentPolicy(ctx context.Context, agentID string) (*Policy, []byte, error) {
 	var state []byte
 	pol := &Policy{}
-	err := p.pool.QueryRow(ctx, `SELECT p.id, p.name, p.description, p.is_default, p.policy, p.updated_at, a.prevention_state
+	err := p.pool.QueryRow(ctx, `SELECT p.id, p.name, p.description, p.is_default, p.policy, p.updated_at, p.version, a.prevention_state
 		FROM agents a JOIN policies p ON p.id = COALESCE(a.policy_id, (SELECT id FROM policies WHERE is_default))
-		WHERE a.id=$1`, agentID).Scan(&pol.ID, &pol.Name, &pol.Description, &pol.IsDefault, &pol.Policy, &pol.UpdatedAt, &state)
+		WHERE a.id=$1`, agentID).Scan(&pol.ID, &pol.Name, &pol.Description, &pol.IsDefault, &pol.Policy, &pol.UpdatedAt, &pol.Version, &state)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, ErrNotFound
 	}
