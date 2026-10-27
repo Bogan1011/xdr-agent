@@ -13,6 +13,7 @@ function summary(e: XdrEvent): string {
   if (e.type === "agent_tamper") return `${e.path}: ${e.args}`;
   if (e.type === "exec_blocked") return `Blocked ${e.exe}${e.parent_exe ? ` (run by ${e.parent_exe})` : ""}`;
   if (e.type === "fim_change") return `${e.path}: ${e.args.split(" ")[0]}`;
+  if (e.type === "shell_command") return `${e.user || "?"}$ ${e.args}`;
   switch (categoryOf(e.type)) {
     case "process":
       return e.type === "process_exit" ? `${e.exe} exited (${e.exit_code})` : e.args || e.exe;
@@ -41,7 +42,8 @@ function Detail({ e }: { e: XdrEvent }) {
     if (e.user) rows.push(["User", e.user]);
   } else if (cat === "process") {
     rows.push(["PID / PPID", `${e.pid} / ${e.ppid}`], ["User", `${e.user} (uid ${e.uid})`], ["Executable", e.exe]);
-    if (e.args) rows.push(["Command line", e.args]);
+    if (e.args) rows.push([e.type === "shell_command" ? "Command" : "Command line", e.args]);
+    if (e.type === "shell_command") rows.push(["Typed or run", e.path === "interactive" ? "Typed at a prompt" : "String run by bash (bash -c, eval, trap)"]);
     if (e.cwd) rows.push(["Working dir", e.cwd]);
     if (e.parent_exe) rows.push(["Parent", e.parent_exe]);
     if (e.type === "process_exit") rows.push(["Exit code", e.exit_code]);

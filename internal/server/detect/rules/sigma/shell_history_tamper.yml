@@ -1,0 +1,10 @@
+id: lnx-shell-history-tampering
+title: Shell history cleared or disabled at a prompt
+description: A bash builtin clears or disables history to hide activity. Builtins start no process, so only bash command telemetry sees them.
+level: medium
+tags: [attack.defense_evasion, attack.t1070.003]
+logsource: {product: linux, category: shell_command}
+detection:
+  selection:
+    cmdline|contains: ['history -c', 'history -w /dev/null', 'unset HISTFILE', 'HISTFILE=/dev/null', 'HISTFILESIZE=0', 'HISTSIZE=0', 'set +o history']
+  condition: selection

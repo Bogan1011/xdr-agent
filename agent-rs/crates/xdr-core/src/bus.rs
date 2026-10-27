@@ -164,6 +164,7 @@ pub fn actor_pid(e: &pb::Event) -> u32 {
         Some(Payload::Yara(y)) => y.pid,
         Some(Payload::Tamper(t)) => t.pid,
         Some(Payload::Policy(p)) => p.pid,
+        Some(Payload::Shell(s)) => s.pid,
         None => 0,
     }
 }

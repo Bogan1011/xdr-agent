@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 //
-// Kernel side of the agent's eBPF collectors. Two ring buffers carry events
+// Kernel side of the agent's eBPF collectors. Three ring buffers carry events
 // to user space:
+//   shell_events: commands run by bash, from uprobes on the bash binary
 //   file_events: file create, write-open, delete, rename and chmod with the
 //                acting process, from the LSM path hooks (CONFIG_SECURITY_PATH)
 //   net_events:  every TCP connect and accept with the acting process, so
@@ -256,4 +257,59 @@ SEC("kretprobe/inet_csk_accept")
 int net_accept(struct pt_regs *ctx)
 {
 	return emit_net(NET_ACCEPT, (struct sock *)PT_REGS_RC(ctx));
+}
+
+// Shell commands: bash's readline() returns each line typed at an
+// interactive prompt; parse_and_execute() runs strings (bash -c, eval,
+// traps). Both are exported by bash, so uprobes find them by name.
+#define CMD_LEN 512
+
+enum shell_src {
+	SHELL_INTERACTIVE = 1,
+	SHELL_STRING = 2,
+};
+
+struct shell_event {
+	u32 pid;
+	u32 ppid;
+	u32 uid;
+	u32 src;
+	char comm[16];
+	char cmd[CMD_LEN];
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 1 << 20);
+} shell_events SEC(".maps");
+
+static __always_inline int emit_shell(u32 src, const char *cmd)
+{
+	if (!cmd || skip_self())
+		return 0;
+	struct shell_event *e = bpf_ringbuf_reserve(&shell_events, sizeof(*e), 0);
+	if (!e)
+		return 0;
+	if (bpf_probe_read_user_str(e->cmd, CMD_LEN, cmd) <= 1) {
+		// NULL at end of input, or an empty line.
+		bpf_ringbuf_discard(e, 0);
+		return 0;
+	}
+	fill_task(&e->pid, &e->ppid, &e->uid, e->comm);
+	e->src = src;
+	bpf_ringbuf_submit(e, 0);
+	return 0;
+}
+
+SEC("uretprobe/readline")
+int shell_readline(struct pt_regs *ctx)
+{
+	return emit_shell(SHELL_INTERACTIVE, (const char *)PT_REGS_RC(ctx));
+}
+
+// parse_and_execute(char *string, const char *from_file, int flags)
+SEC("uprobe/parse_and_execute")
+int shell_string(struct pt_regs *ctx)
+{
+	return emit_shell(SHELL_STRING, (const char *)PT_REGS_PARM1(ctx));
 }

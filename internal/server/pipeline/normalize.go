@@ -72,6 +72,12 @@ func Normalize(src Source, e *xdrv1.Event) store.Event {
 		t := p.Tamper
 		// The action is kept in path so rules can match it exactly.
 		r.Path, r.Args, r.PID, r.Exe = t.Action, t.Detail, t.Pid, t.Exe
+	case *xdrv1.Event_Shell:
+		se := p.Shell
+		// The command is kept in args so rules can match it like a command
+		// line; path says where it came from (interactive or string).
+		r.PID, r.PPID, r.UID, r.User, r.Exe = se.Pid, se.Ppid, se.Uid, se.User, se.Exe
+		r.Args, r.Path, r.Cwd = se.Command, se.Source, se.Cwd
 	case *xdrv1.Event_Policy:
 		pe := p.Policy
 		// Like tamper events, the action is kept in path.

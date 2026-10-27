@@ -102,6 +102,39 @@ func ParseNetEvent(b []byte) (NetEvent, error) {
 	return e, nil
 }
 
+// Shell command sources reported in ShellEvent.Src; they match xdr.bpf.c.
+const (
+	ShellInteractive = 1 // a line typed at a bash prompt (readline)
+	ShellString      = 2 // a string bash ran: bash -c, eval, a trap
+
+	cmdLen        = 512
+	shellEventLen = 4*4 + 16 + cmdLen
+)
+
+// ShellEvent is a decoded shell_event record.
+type ShellEvent struct {
+	PID, PPID, UID uint32
+	Src            uint32
+	Comm           string
+	Command        string
+}
+
+// ParseShellEvent decodes a raw shell_event from the ring buffer.
+func ParseShellEvent(b []byte) (ShellEvent, error) {
+	if len(b) < shellEventLen {
+		return ShellEvent{}, errShort
+	}
+	le := binary.LittleEndian
+	return ShellEvent{
+		PID:     le.Uint32(b[0:]),
+		PPID:    le.Uint32(b[4:]),
+		UID:     le.Uint32(b[8:]),
+		Src:     le.Uint32(b[12:]),
+		Comm:    cString(b[16:32]),
+		Command: cString(b[32:shellEventLen]),
+	}, nil
+}
+
 // joinSlots turns name slots, written leaf first, into an absolute path. A
 // path deeper than the slots allow starts with "/...".
 func joinSlots(buf []byte, n uint32) string {

@@ -45,3 +45,15 @@ func TestEBPFFileHandle(t *testing.T) {
 		t.Errorf("pending writes left: %v", f.writes)
 	}
 }
+
+func TestShellEvent(t *testing.T) {
+	e := shellEvent(ebpf.ShellEvent{PID: 4242424, UID: 0, Src: ebpf.ShellInteractive, Comm: "bash", Command: "history -c\n"})
+	se := e.GetShell()
+	if e.Type != xdrv1.EventType_EVENT_TYPE_SHELL_COMMAND || se.Command != "history -c" || se.Source != "interactive" ||
+		se.User != "root" || se.Exe != "[bash]" {
+		t.Fatalf("event %v", e)
+	}
+	if shellEvent(ebpf.ShellEvent{Src: ebpf.ShellString, Command: "x"}).GetShell().Source != "string" {
+		t.Error("source of bash -c")
+	}
+}
