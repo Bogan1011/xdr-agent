@@ -143,6 +143,9 @@ type Agent struct {
 	TamperProtected  bool `json:"tamper_protected"`
 	// PamRecordAll records every sudo session, not only just-in-time grants.
 	PamRecordAll bool `json:"pam_record_all"`
+	// PolicyID is the assigned policy, 0 for the default policy.
+	PolicyID   int64  `json:"policy_id"`
+	PolicyName string `json:"policy_name"`
 	// Updating is true while a self-update command is queued or running.
 	Updating bool `json:"updating"`
 }
@@ -150,7 +153,8 @@ type Agent struct {
 const agentCols = `id, hostname, os, os_version, kernel, arch, ip_addresses, agent_version, machine_id,
 	COALESCE(cert_expires, 'epoch'), enrolled_at, COALESCE(last_seen, 'epoch'), events_sent, events_dropped,
 	cpu_percent, rss_bytes, revoked, pending_command, COALESCE(uninstalled_at, 'epoch'), isolated, content_version,
-	tamper_protection, tamper_protected, pam_record_all,
+	tamper_protection, tamper_protected, pam_record_all, COALESCE(policy_id, 0),
+	COALESCE((SELECT name FROM policies WHERE id = COALESCE(agents.policy_id, (SELECT id FROM policies WHERE is_default))), ''),
 	EXISTS (SELECT 1 FROM commands c WHERE c.agent_id = agents.id AND c.type = 'update_agent' AND c.status IN ('pending', 'sent'))`
 
 func scanAgent(row pgx.Row) (*Agent, error) {
@@ -158,7 +162,7 @@ func scanAgent(row pgx.Row) (*Agent, error) {
 	err := row.Scan(&a.ID, &a.Hostname, &a.OS, &a.OSVersion, &a.Kernel, &a.Arch, &a.IPAddresses, &a.AgentVersion,
 		&a.MachineID, &a.CertExpires, &a.EnrolledAt, &a.LastSeen, &a.EventsSent, &a.EventsDropped,
 		&a.CPUPercent, &a.RSSBytes, &a.Revoked, &a.PendingCommand, &a.UninstalledAt, &a.Isolated, &a.ContentVersion,
-		&a.TamperProtection, &a.TamperProtected, &a.PamRecordAll, &a.Updating)
+		&a.TamperProtection, &a.TamperProtected, &a.PamRecordAll, &a.PolicyID, &a.PolicyName, &a.Updating)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}

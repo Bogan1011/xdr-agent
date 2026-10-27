@@ -362,3 +362,18 @@ func (a *Agent) restoreIsolation() {
 		a.log.Warn("network isolation re-applied", "detail", msg)
 	}
 }
+
+// autoQuarantine moves a file that matched a YARA rule into quarantine when
+// the anti-malware module asks for it.
+func (a *Agent) autoQuarantine(path string) string {
+	if !a.prev.AutoQuarantine() {
+		return ""
+	}
+	id, err := a.quarantineFile(map[string]string{"path": path})
+	if err != nil {
+		a.log.Error("auto-quarantine failed", "path", path, "err", err)
+		return ""
+	}
+	a.log.Warn("file quarantined by anti-malware", "path", path, "quarantine_id", id)
+	return "quarantined"
+}

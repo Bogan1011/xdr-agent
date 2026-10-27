@@ -1,0 +1,10 @@
+id: xdr-usb-storage-blocked
+title: USB storage device blocked
+description: A USB mass storage device was connected and device control blocked it.
+level: medium
+tags: [attack.exfiltration, attack.t1052.001]
+logsource: {product: linux, category: device_control}
+detection:
+  hit:
+    action: blocked
+  condition: hit

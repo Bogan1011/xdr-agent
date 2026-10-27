@@ -28,6 +28,8 @@ type Scanner struct {
 	MaxBytes int64
 	// Skip lists path prefixes that are never scanned.
 	Skip []string
+	// OnMatch, when set, may act on a matched file and returns what it did.
+	OnMatch func(path string) string
 
 	rules   atomic.Pointer[yara.Rules]
 	version atomic.Value // string
@@ -174,9 +176,14 @@ func (s *Scanner) scanFile(r scanReq, force bool) (bool, error) {
 		return false, nil
 	}
 	s.Log.Warn("YARA match", "path", r.path, "rules", names, "sha256", hash)
+	var action string
+	if s.OnMatch != nil {
+		f.Close()
+		action = s.OnMatch(r.path)
+	}
 	e := collector.NewEvent(xdrv1.EventType_EVENT_TYPE_YARA_MATCH)
 	e.Payload = &xdrv1.Event_Yara{Yara: &xdrv1.YaraMatch{
-		Path: r.path, Sha256: hash, Rules: names, Pid: r.pid, Size: uint64(len(data)),
+		Path: r.path, Sha256: hash, Rules: names, Pid: r.pid, Size: uint64(len(data)), Action: action,
 	}}
 	s.Emit(e)
 	return true, nil

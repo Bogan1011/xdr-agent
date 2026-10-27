@@ -140,8 +140,8 @@ func (s *Agents) Heartbeat(ctx context.Context, req *xdrv1.HeartbeatRequest) (*x
 			s.Log.Warn("prevention state update", "agent_id", a.id, "err", err)
 		}
 	}
-	resp.ContentVersion, _, _ = s.Detect.Content()
-	if p, _, err := ResolvePrevention(ctx, s.DB, a.id); err == nil {
+	resp.ContentVersion = s.Detect.Content().Version
+	if p, _, _, err := ResolvePrevention(ctx, s.DB, a.id); err == nil {
 		resp.Prevention = p
 	} else {
 		s.Log.Warn("prevention policy", "agent_id", a.id, "err", err)
@@ -175,28 +175,19 @@ func (s *Agents) Heartbeat(ctx context.Context, req *xdrv1.HeartbeatRequest) (*x
 	return resp, nil
 }
 
-// ResolvePrevention returns the policy an endpoint enforces: its own when
-// set (custom is true), else the fleet policy, else the default.
-func ResolvePrevention(ctx context.Context, db *store.Postgres, id string) (p *xdrv1.PreventionPolicy, custom bool, err error) {
-	own, _, err := db.AgentPrevention(ctx, id)
+// ResolvePrevention returns the policy an endpoint enforces: the one
+// assigned to it, else the default policy.
+func ResolvePrevention(ctx context.Context, db *store.Postgres, id string) (*xdrv1.PreventionPolicy, *store.Policy, []byte, error) {
+	pol, state, err := db.AgentPolicy(ctx, id)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, nil, err
 	}
-	if own != nil {
-		p, err = policy.UnmarshalJSON(own)
-		return p, true, err
+	p, err := policy.UnmarshalJSON(pol.Policy)
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	p, err = GlobalPrevention(ctx, db)
-	return p, false, err
-}
-
-// GlobalPrevention is the fleet-wide policy, or the default when unset.
-func GlobalPrevention(ctx context.Context, db *store.Postgres) (*xdrv1.PreventionPolicy, error) {
-	raw, err := db.GlobalPrevention(ctx)
-	if err != nil || raw == nil {
-		return policy.Default(), err
-	}
-	return policy.UnmarshalJSON(raw)
+	p.Name = pol.Name
+	return p, pol, state, nil
 }
 
 func (s *Agents) SendEvents(ctx context.Context, req *xdrv1.EventBatch) (*xdrv1.SendEventsResponse, error) {
@@ -218,8 +209,9 @@ func (s *Agents) SendEvents(ctx context.Context, req *xdrv1.EventBatch) (*xdrv1.
 }
 
 func (s *Agents) GetDetectionContent(ctx context.Context, _ *xdrv1.DetectionContentRequest) (*xdrv1.DetectionContent, error) {
-	v, src, blocked := s.Detect.Content()
-	return &xdrv1.DetectionContent{Version: v, YaraRules: src, BlockedSha256: blocked}, nil
+	c := s.Detect.Content()
+	return &xdrv1.DetectionContent{Version: c.Version, YaraRules: c.Yara, BlockedSha256: c.Blocked,
+		BadIps: c.BadIPs, BadDomains: c.BadDomains}, nil
 }
 
 func (s *Agents) ReportCommandResult(ctx context.Context, req *xdrv1.CommandResult) (*xdrv1.CommandResultAck, error) {
@@ -322,12 +314,19 @@ func toRow(a agentCtx, e *xdrv1.Event) store.Event {
 	case *xdrv1.Event_Yara:
 		y := p.Yara
 		r.Path, r.SHA256, r.Size, r.PID = y.Path, y.Sha256, y.Size, y.Pid
-		// The matched rule names are kept in args.
+		// The matched rule names are kept in args, then what anti-malware did.
 		r.Args = strings.Join(y.Rules, ", ")
+		if y.Action != "" {
+			r.Args += "; " + y.Action
+		}
 	case *xdrv1.Event_Tamper:
 		t := p.Tamper
 		// The action is kept in path so rules can match it exactly.
 		r.Path, r.Args, r.PID, r.Exe = t.Action, t.Detail, t.Pid, t.Exe
+	case *xdrv1.Event_Policy:
+		pe := p.Policy
+		// Like tamper events, the action is kept in path.
+		r.Path, r.Args, r.RemoteAddr, r.PID, r.Exe, r.SHA256, r.User = pe.Action, pe.Detail, pe.RemoteAddr, pe.Pid, pe.Exe, pe.Sha256, pe.User
 	}
 	return r
 }

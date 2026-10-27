@@ -1,5 +1,5 @@
-// Package policy validates prevention policies and renders the host
-// firewall. The console uses it to reject bad policies before they are
+// Package policy validates prevention policies and renders the nftables
+// tables the agent applies for them. The console uses it to reject bad policies before they are
 // saved; the agent uses it to apply them.
 package policy
 
@@ -39,7 +39,15 @@ func Default() *xdrv1.PreventionPolicy {
 			Exclude:         []string{"/etc/sudoers.d/xdr-*", "/etc/sudoers.d/.xdr-*", "/usr/local/bin/xdr-agent*"},
 			IntervalMinutes: 60,
 		},
-		Firewall: &xdrv1.FirewallPolicy{},
+		Firewall:      &xdrv1.FirewallPolicy{},
+		AntiMalware:   &xdrv1.AntiMalwarePolicy{Enabled: true},
+		WebReputation: &xdrv1.WebReputationPolicy{UseThreatIntel: true},
+		IntrusionPrevention: &xdrv1.IntrusionPreventionPolicy{
+			MaxFailures: 5, WindowSeconds: 300, BanMinutes: 30,
+		},
+		DeviceControl:      &xdrv1.DeviceControlPolicy{UsbStorage: "allow"},
+		ActivityMonitoring: &xdrv1.ActivityMonitoringPolicy{Process: true, File: true, Network: true},
+		ApplicationControl: &xdrv1.ApplicationControlPolicy{},
 	}
 }
 
@@ -57,6 +65,7 @@ func Normalize(p *xdrv1.PreventionPolicy) *xdrv1.PreventionPolicy {
 	if p.Firewall == nil {
 		p.Firewall = &xdrv1.FirewallPolicy{}
 	}
+	normalizeModules(p)
 	return p
 }
 
@@ -88,7 +97,7 @@ func Validate(p *xdrv1.PreventionPolicy) error {
 			return fmt.Errorf("firewall rule %d: %w", i+1, err)
 		}
 	}
-	return nil
+	return validateModules(p)
 }
 
 // Matches reports whether path is one of the patterns: a path prefix, or a

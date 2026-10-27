@@ -30,14 +30,20 @@ type Service struct {
 	Log *slog.Logger
 
 	engine  atomic.Pointer[Engine]
-	content atomic.Pointer[content]
+	content atomic.Pointer[Content]
 	reload  sync.Mutex
 }
 
-type content struct {
-	version, yara string
-	blocked       []byte
+// Content is what agents download: the YARA bundle, the hash block list for
+// exec blocking and the IP and domain IOCs for web reputation.
+type Content struct {
+	Version, Yara      string
+	Blocked            []byte
+	BadIPs, BadDomains []string
 }
+
+// maxBadNetwork caps each of the IP and domain lists sent to agents.
+const maxBadNetwork = 50000
 
 // maxBlocked caps the hash block list sent to agents (16 MiB of digests).
 const maxBlocked = 500000
@@ -73,13 +79,14 @@ func (s *Service) Reload(ctx context.Context) error {
 	s.engine.Store(e)
 	src, _, err := YaraBundle(rules)
 	blocked := BlockList(iocs, maxBlocked)
-	ver := ContentVersion(src, blocked)
+	ips, domains := NetworkBlockList(iocs, maxBadNetwork)
+	ver := ContentVersion(src, blocked, ips, domains)
 	if err != nil {
 		// Keep serving the previous bundle; saving rules validates the bundle,
 		// so this only happens with rules written to the database directly.
 		s.Log.Error("YARA bundle does not compile, agents keep the previous rules", "err", err)
 	} else {
-		s.content.Store(&content{version: ver, yara: src, blocked: blocked})
+		s.content.Store(&Content{Version: ver, Yara: src, Blocked: blocked, BadIPs: ips, BadDomains: domains})
 	}
 	sig, yr, n := e.Counts()
 	s.Log.Info("detection content loaded", "sigma_rules", sig, "yara_rules", yr, "iocs", n,
@@ -87,13 +94,12 @@ func (s *Service) Reload(ctx context.Context) error {
 	return nil
 }
 
-// Content is the YARA bundle agents run, the hash block list for exec
-// blocking (concatenated SHA-256 digests) and their combined version.
-func (s *Service) Content() (version, yara string, blocked []byte) {
+// Content is the current agent content; the zero value when none is loaded.
+func (s *Service) Content() Content {
 	if c := s.content.Load(); c != nil {
-		return c.version, c.yara, c.blocked
+		return *c
 	}
-	return "", "", nil
+	return Content{}
 }
 
 // Process evaluates ingested events and raises alerts.

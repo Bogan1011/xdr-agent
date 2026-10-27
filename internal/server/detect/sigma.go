@@ -95,6 +95,10 @@ var categories = map[string][]string{
 	"yara":                {"yara_match"},
 	"fim":                 {"fim_change"},
 	"exec_blocked":        {"exec_blocked"},
+	"web_reputation":      {"web_reputation"},
+	"intrusion":           {"intrusion"},
+	"device_control":      {"device_control"},
+	"app_control":         {"app_control"},
 }
 
 var levels = map[string]string{

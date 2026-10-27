@@ -1,0 +1,10 @@
+id: xdr-app-control
+title: Application control rule matched
+description: A file on the policy's application block list was executed (detected) or stopped from running (blocked).
+level: medium
+tags: [attack.execution, attack.t1204.002]
+logsource: {product: linux, category: app_control}
+detection:
+  hit:
+    action: [blocked, detected]
+  condition: hit

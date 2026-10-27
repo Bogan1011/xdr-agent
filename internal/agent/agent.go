@@ -90,11 +90,13 @@ func (a *Agent) wakeHeartbeat() {
 // emit never blocks a collector: when the backend is unreachable and the
 // queue is full, new events are dropped and counted.
 func (a *Agent) emit(e *xdrv1.Event) {
-	if a.scanner != nil {
+	if a.scanner != nil && a.prev.RealtimeScan() {
 		a.scanner.Observe(e)
 	}
 	a.prev.Observe(e)
-	a.send(e)
+	if a.prev.Telemetry(e.Type) {
+		a.send(e)
+	}
 }
 
 func (a *Agent) send(e *xdrv1.Event) {
@@ -152,6 +154,7 @@ func (a *Agent) Run() error {
 	a.restoreIsolation()
 	a.scanner = NewScanner(a.log.With("component", "yara"), a.send, a.cfg.ScanMaxBytes,
 		append([]string{a.cfg.StateDir}, a.cfg.FileExclude...))
+	a.scanner.OnMatch = a.autoQuarantine
 
 	hasher := procfs.NewHasher(50000)
 	collectors := []collector.Collector{
@@ -307,6 +310,7 @@ func (a *Agent) updateContent(ctx context.Context, client xdrv1.AgentServiceClie
 		return
 	}
 	a.prev.SetBlocklist(c.BlockedSha256)
+	a.prev.SetIntel(c.BadIps, c.BadDomains)
 	if err := a.scanner.Update(c.Version, c.YaraRules); err != nil {
 		a.log.Error("YARA rules from the console do not compile, keeping the current ones", "err", err)
 	}
