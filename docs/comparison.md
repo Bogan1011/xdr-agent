@@ -1,6 +1,6 @@
 # How we compare: Trend Micro Vision One and CrowdStrike Falcon
 
-Status as of release 0.4.0 (Linux agent, single-tenant console). The
+Status as of release 0.6.0 (Linux agent, single-tenant console). The
 competitor columns describe what their commercial platforms offer in
 general; exact features depend on the licence tier, and both vendors change
 their line-ups often, so check current datasheets before quoting this
@@ -19,13 +19,15 @@ Legend: ✅ have it · 🟡 partial · ❌ not yet
 | Containers / Kubernetes | 🟡 host-level events only | ✅ Container Security | ✅ Falcon Cloud Security |
 | Cloud workloads, agentless posture | ❌ | ✅ | ✅ |
 | **Prevention** | | | |
-| Signature anti-malware | 🟡 YARA + SHA-256 IOCs, exec blocking of hash IOCs | ✅ | ✅ (ML, no signatures) |
+| Policies with per-module settings, assigned to endpoints | ✅ eight modules, Deep Security style | ✅ | ✅ prevention policies |
+| Signature anti-malware | 🟡 real-time YARA + SHA-256 IOCs, exec blocking, auto-quarantine | ✅ | ✅ (ML, no signatures) |
+| Web reputation | 🟡 IP/domain IOC block list (nftables), no URL categories | ✅ | 🟡 |
 | Machine-learning file prevention | ❌ | ✅ | ✅ |
 | Exploit / memory protection | ❌ | ✅ | ✅ |
-| Host firewall, IPS / virtual patching | 🟡 host firewall policy (nftables), no IPS | ✅ (Deep Security heritage) | 🟡 firewall management |
+| Host firewall, IPS / virtual patching | 🟡 host firewall (nftables), SSH brute-force IPS, no virtual patching | ✅ (Deep Security heritage) | 🟡 firewall management |
 | File integrity monitoring | ✅ baselines, drift alerts, accept-as-baseline | ✅ | ✅ (FileVantage) |
-| Application control | ❌ | ✅ | 🟡 |
-| Device control (USB) | ❌ | ✅ | ✅ |
+| Application control | 🟡 block list by path/hash, no allow-list lockdown | ✅ | 🟡 |
+| Device control (USB) | 🟡 USB storage allow/block with exceptions, no read-only | ✅ | ✅ |
 | **Detection and investigation** | | | |
 | Process, file, network telemetry | ✅ | ✅ | ✅ |
 | Behaviour rules, MITRE tags | ✅ Sigma-style, 20+ built-in | ✅ | ✅ |
@@ -81,10 +83,11 @@ Legend: ✅ have it · 🟡 partial · ❌ not yet
 3. **Console hardening**: HTTPS by default, multiple users with roles,
    SSO (OIDC), audit log of admin actions, approval by a second person for
    PAM grants. Deep Security-style admin-set agent password (backlog).
-4. **Prevention depth**: exec blocking, FIM baselines and the host firewall
-   shipped in 0.4.0. Next: machine-learning or reputation-based blocking,
-   application control (allow-lists), IPS / virtual patching, and blocking
-   scripts run through an interpreter (fanotify only sees direct execs).
+4. **Prevention depth**: policies with eight modules shipped in 0.6.0.
+   Next: machine-learning blocking, application control allow-lists
+   (lockdown), IPS rules beyond SSH brute force / virtual patching, URL
+   categories for web reputation, read-only USB, and blocking scripts run
+   through an interpreter (fanotify only sees direct execs).
 5. **Vulnerability and posture**: package inventory matched against CVE
    feeds, CIS-style configuration checks, a per-host risk score.
 6. **Live response**: the remote shell and live view shipped in 0.5.0.

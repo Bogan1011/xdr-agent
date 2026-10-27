@@ -1,0 +1,10 @@
+id: xdr-web-reputation
+title: Connection to a known-bad address
+description: A process connected, or tried to connect, to an address or domain the web reputation module lists (threat intel or the policy). With blocking on, the connection was rejected.
+level: high
+tags: [attack.command_and_control, attack.t1071]
+logsource: {product: linux, category: web_reputation}
+detection:
+  hit:
+    action: [blocked, detected]
+  condition: hit

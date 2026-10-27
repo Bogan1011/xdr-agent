@@ -1,0 +1,10 @@
+id: xdr-ssh-bruteforce
+title: SSH brute force
+description: One address failed to log in over SSH many times in a short window. With prevention on, the agent banned the address.
+level: high
+tags: [attack.credential_access, attack.t1110]
+logsource: {product: linux, category: intrusion}
+detection:
+  hit:
+    action: [banned, detected]
+  condition: hit

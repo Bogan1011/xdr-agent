@@ -11,7 +11,7 @@ import Alerts from "./pages/Alerts";
 import Rules from "./pages/Rules";
 import IOCs from "./pages/IOCs";
 import PAM from "./pages/PAM";
-import Prevention from "./pages/Prevention";
+import Policies, { PolicyEditor } from "./pages/Policies";
 import RemoteAccess, { RemoteShell, WatchShell } from "./pages/RemoteAccess";
 import { usePoll } from "./hooks";
 import { icons } from "./icons";
@@ -56,7 +56,7 @@ function Shell({ user, onSignOut }: { user: string; onSignOut: () => void }) {
       items: [
         { to: "/endpoints", label: "Endpoint inventory" },
         { to: "/deploy", label: "Install & uninstall" },
-        { to: "/prevention", label: "Prevention policies" },
+        { to: "/policies", label: "Policies" },
       ],
     },
     {
@@ -136,10 +136,12 @@ function Shell({ user, onSignOut }: { user: string; onSignOut: () => void }) {
             <Route path="/rules" element={<Rules />} />
             <Route path="/iocs" element={<IOCs />} />
             <Route path="/pam" element={<PAM />} />
+            <Route path="/policies" element={<Policies />} />
+            <Route path="/policies/:id" element={<PolicyEditor />} />
+            <Route path="/prevention" element={<Navigate to="/policies" replace />} />
             <Route path="/remote" element={<RemoteAccess />} />
             <Route path="/remote/:id" element={<RemoteShell />} />
             <Route path="/remote/watch/:sid" element={<WatchShell />} />
-            <Route path="/prevention" element={<Prevention />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

@@ -128,6 +128,11 @@ const (
 	EventType_EVENT_TYPE_EXEC_BLOCKED EventType = 13
 	// A monitored file differs from its FIM baseline (file payload).
 	EventType_EVENT_TYPE_FIM_CHANGE EventType = 14
+	// Policy module events (policy payload).
+	EventType_EVENT_TYPE_WEB_REPUTATION EventType = 15
+	EventType_EVENT_TYPE_INTRUSION      EventType = 16
+	EventType_EVENT_TYPE_DEVICE_CONTROL EventType = 17
+	EventType_EVENT_TYPE_APP_CONTROL    EventType = 18
 )
 
 // Enum value maps for EventType.
@@ -148,23 +153,31 @@ var (
 		12: "EVENT_TYPE_AGENT_TAMPER",
 		13: "EVENT_TYPE_EXEC_BLOCKED",
 		14: "EVENT_TYPE_FIM_CHANGE",
+		15: "EVENT_TYPE_WEB_REPUTATION",
+		16: "EVENT_TYPE_INTRUSION",
+		17: "EVENT_TYPE_DEVICE_CONTROL",
+		18: "EVENT_TYPE_APP_CONTROL",
 	}
 	EventType_value = map[string]int32{
-		"EVENT_TYPE_UNSPECIFIED":  0,
-		"EVENT_TYPE_PROCESS_EXEC": 1,
-		"EVENT_TYPE_PROCESS_EXIT": 2,
-		"EVENT_TYPE_FILE_CREATE":  3,
-		"EVENT_TYPE_FILE_MODIFY":  4,
-		"EVENT_TYPE_FILE_DELETE":  5,
-		"EVENT_TYPE_FILE_RENAME":  6,
-		"EVENT_TYPE_FILE_ATTRIB":  7,
-		"EVENT_TYPE_NET_CONNECT":  8,
-		"EVENT_TYPE_NET_LISTEN":   9,
-		"EVENT_TYPE_YARA_MATCH":   10,
-		"EVENT_TYPE_NET_ACCEPT":   11,
-		"EVENT_TYPE_AGENT_TAMPER": 12,
-		"EVENT_TYPE_EXEC_BLOCKED": 13,
-		"EVENT_TYPE_FIM_CHANGE":   14,
+		"EVENT_TYPE_UNSPECIFIED":    0,
+		"EVENT_TYPE_PROCESS_EXEC":   1,
+		"EVENT_TYPE_PROCESS_EXIT":   2,
+		"EVENT_TYPE_FILE_CREATE":    3,
+		"EVENT_TYPE_FILE_MODIFY":    4,
+		"EVENT_TYPE_FILE_DELETE":    5,
+		"EVENT_TYPE_FILE_RENAME":    6,
+		"EVENT_TYPE_FILE_ATTRIB":    7,
+		"EVENT_TYPE_NET_CONNECT":    8,
+		"EVENT_TYPE_NET_LISTEN":     9,
+		"EVENT_TYPE_YARA_MATCH":     10,
+		"EVENT_TYPE_NET_ACCEPT":     11,
+		"EVENT_TYPE_AGENT_TAMPER":   12,
+		"EVENT_TYPE_EXEC_BLOCKED":   13,
+		"EVENT_TYPE_FIM_CHANGE":     14,
+		"EVENT_TYPE_WEB_REPUTATION": 15,
+		"EVENT_TYPE_INTRUSION":      16,
+		"EVENT_TYPE_DEVICE_CONTROL": 17,
+		"EVENT_TYPE_APP_CONTROL":    18,
 	}
 )
 
@@ -665,12 +678,24 @@ func (x *HeartbeatResponse) GetPrevention() *PreventionPolicy {
 
 // PreventionPolicy is what the agent enforces on the host, as opposed to
 // what it only reports.
+//
+// The console edits it as a named policy with one module per section; each
+// endpoint is assigned one policy.
 type PreventionPolicy struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Deny execution of files whose SHA-256 is a hash IOC (fanotify).
-	BlockExec     bool            `protobuf:"varint,1,opt,name=block_exec,json=blockExec,proto3" json:"block_exec,omitempty"`
-	Fim           *FimPolicy      `protobuf:"bytes,2,opt,name=fim,proto3" json:"fim,omitempty"`
-	Firewall      *FirewallPolicy `protobuf:"bytes,3,opt,name=firewall,proto3" json:"firewall,omitempty"`
+	// Deprecated: anti_malware.block_known_bad. Read only to migrate policies
+	// saved before modules existed.
+	BlockExec           bool                       `protobuf:"varint,1,opt,name=block_exec,json=blockExec,proto3" json:"block_exec,omitempty"`
+	Fim                 *FimPolicy                 `protobuf:"bytes,2,opt,name=fim,proto3" json:"fim,omitempty"`
+	Firewall            *FirewallPolicy            `protobuf:"bytes,3,opt,name=firewall,proto3" json:"firewall,omitempty"`
+	AntiMalware         *AntiMalwarePolicy         `protobuf:"bytes,4,opt,name=anti_malware,json=antiMalware,proto3" json:"anti_malware,omitempty"`
+	WebReputation       *WebReputationPolicy       `protobuf:"bytes,5,opt,name=web_reputation,json=webReputation,proto3" json:"web_reputation,omitempty"`
+	IntrusionPrevention *IntrusionPreventionPolicy `protobuf:"bytes,6,opt,name=intrusion_prevention,json=intrusionPrevention,proto3" json:"intrusion_prevention,omitempty"`
+	DeviceControl       *DeviceControlPolicy       `protobuf:"bytes,7,opt,name=device_control,json=deviceControl,proto3" json:"device_control,omitempty"`
+	ActivityMonitoring  *ActivityMonitoringPolicy  `protobuf:"bytes,8,opt,name=activity_monitoring,json=activityMonitoring,proto3" json:"activity_monitoring,omitempty"`
+	ApplicationControl  *ApplicationControlPolicy  `protobuf:"bytes,9,opt,name=application_control,json=applicationControl,proto3" json:"application_control,omitempty"`
+	// The console's name for the policy, shown in the agent's log.
+	Name          string `protobuf:"bytes,10,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -726,6 +751,479 @@ func (x *PreventionPolicy) GetFirewall() *FirewallPolicy {
 	return nil
 }
 
+func (x *PreventionPolicy) GetAntiMalware() *AntiMalwarePolicy {
+	if x != nil {
+		return x.AntiMalware
+	}
+	return nil
+}
+
+func (x *PreventionPolicy) GetWebReputation() *WebReputationPolicy {
+	if x != nil {
+		return x.WebReputation
+	}
+	return nil
+}
+
+func (x *PreventionPolicy) GetIntrusionPrevention() *IntrusionPreventionPolicy {
+	if x != nil {
+		return x.IntrusionPrevention
+	}
+	return nil
+}
+
+func (x *PreventionPolicy) GetDeviceControl() *DeviceControlPolicy {
+	if x != nil {
+		return x.DeviceControl
+	}
+	return nil
+}
+
+func (x *PreventionPolicy) GetActivityMonitoring() *ActivityMonitoringPolicy {
+	if x != nil {
+		return x.ActivityMonitoring
+	}
+	return nil
+}
+
+func (x *PreventionPolicy) GetApplicationControl() *ApplicationControlPolicy {
+	if x != nil {
+		return x.ApplicationControl
+	}
+	return nil
+}
+
+func (x *PreventionPolicy) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type AntiMalwarePolicy struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Real-time YARA scanning of new and changed files and executed binaries.
+	Enabled bool `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	// Deny execution of files whose SHA-256 is a hash IOC (fanotify).
+	BlockKnownBad bool `protobuf:"varint,2,opt,name=block_known_bad,json=blockKnownBad,proto3" json:"block_known_bad,omitempty"`
+	// Move files that match a YARA rule into quarantine.
+	AutoQuarantine bool `protobuf:"varint,3,opt,name=auto_quarantine,json=autoQuarantine,proto3" json:"auto_quarantine,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *AntiMalwarePolicy) Reset() {
+	*x = AntiMalwarePolicy{}
+	mi := &file_xdr_v1_agent_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AntiMalwarePolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AntiMalwarePolicy) ProtoMessage() {}
+
+func (x *AntiMalwarePolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_xdr_v1_agent_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AntiMalwarePolicy.ProtoReflect.Descriptor instead.
+func (*AntiMalwarePolicy) Descriptor() ([]byte, []int) {
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *AntiMalwarePolicy) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *AntiMalwarePolicy) GetBlockKnownBad() bool {
+	if x != nil {
+		return x.BlockKnownBad
+	}
+	return false
+}
+
+func (x *AntiMalwarePolicy) GetAutoQuarantine() bool {
+	if x != nil {
+		return x.AutoQuarantine
+	}
+	return false
+}
+
+// Outbound connections to known-bad addresses: IP and domain IOCs from threat
+// intel and the policy's own domains, resolved by the agent.
+type WebReputationPolicy struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Enabled bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	// Reject the connections; otherwise only report them.
+	Block          bool     `protobuf:"varint,2,opt,name=block,proto3" json:"block,omitempty"`
+	UseThreatIntel bool     `protobuf:"varint,3,opt,name=use_threat_intel,json=useThreatIntel,proto3" json:"use_threat_intel,omitempty"`
+	BlockedDomains []string `protobuf:"bytes,4,rep,name=blocked_domains,json=blockedDomains,proto3" json:"blocked_domains,omitempty"`
+	// Never blocked, even when threat intel lists them.
+	AllowedDomains []string `protobuf:"bytes,5,rep,name=allowed_domains,json=allowedDomains,proto3" json:"allowed_domains,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *WebReputationPolicy) Reset() {
+	*x = WebReputationPolicy{}
+	mi := &file_xdr_v1_agent_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WebReputationPolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WebReputationPolicy) ProtoMessage() {}
+
+func (x *WebReputationPolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_xdr_v1_agent_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WebReputationPolicy.ProtoReflect.Descriptor instead.
+func (*WebReputationPolicy) Descriptor() ([]byte, []int) {
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *WebReputationPolicy) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *WebReputationPolicy) GetBlock() bool {
+	if x != nil {
+		return x.Block
+	}
+	return false
+}
+
+func (x *WebReputationPolicy) GetUseThreatIntel() bool {
+	if x != nil {
+		return x.UseThreatIntel
+	}
+	return false
+}
+
+func (x *WebReputationPolicy) GetBlockedDomains() []string {
+	if x != nil {
+		return x.BlockedDomains
+	}
+	return nil
+}
+
+func (x *WebReputationPolicy) GetAllowedDomains() []string {
+	if x != nil {
+		return x.AllowedDomains
+	}
+	return nil
+}
+
+// Brute-force protection: repeated failed SSH logins from one address.
+type IntrusionPreventionPolicy struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Enabled bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	// Ban the address with nftables; otherwise only report it.
+	Prevent       bool   `protobuf:"varint,2,opt,name=prevent,proto3" json:"prevent,omitempty"`
+	MaxFailures   uint32 `protobuf:"varint,3,opt,name=max_failures,json=maxFailures,proto3" json:"max_failures,omitempty"`
+	WindowSeconds uint32 `protobuf:"varint,4,opt,name=window_seconds,json=windowSeconds,proto3" json:"window_seconds,omitempty"`
+	BanMinutes    uint32 `protobuf:"varint,5,opt,name=ban_minutes,json=banMinutes,proto3" json:"ban_minutes,omitempty"`
+	// IPs or CIDRs that are never banned.
+	Allow         []string `protobuf:"bytes,6,rep,name=allow,proto3" json:"allow,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IntrusionPreventionPolicy) Reset() {
+	*x = IntrusionPreventionPolicy{}
+	mi := &file_xdr_v1_agent_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IntrusionPreventionPolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IntrusionPreventionPolicy) ProtoMessage() {}
+
+func (x *IntrusionPreventionPolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_xdr_v1_agent_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IntrusionPreventionPolicy.ProtoReflect.Descriptor instead.
+func (*IntrusionPreventionPolicy) Descriptor() ([]byte, []int) {
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *IntrusionPreventionPolicy) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *IntrusionPreventionPolicy) GetPrevent() bool {
+	if x != nil {
+		return x.Prevent
+	}
+	return false
+}
+
+func (x *IntrusionPreventionPolicy) GetMaxFailures() uint32 {
+	if x != nil {
+		return x.MaxFailures
+	}
+	return 0
+}
+
+func (x *IntrusionPreventionPolicy) GetWindowSeconds() uint32 {
+	if x != nil {
+		return x.WindowSeconds
+	}
+	return 0
+}
+
+func (x *IntrusionPreventionPolicy) GetBanMinutes() uint32 {
+	if x != nil {
+		return x.BanMinutes
+	}
+	return 0
+}
+
+func (x *IntrusionPreventionPolicy) GetAllow() []string {
+	if x != nil {
+		return x.Allow
+	}
+	return nil
+}
+
+type DeviceControlPolicy struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Enabled bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	// USB mass storage: allow or block.
+	UsbStorage string `protobuf:"bytes,2,opt,name=usb_storage,json=usbStorage,proto3" json:"usb_storage,omitempty"`
+	// vendor:product IDs (hex, e.g. "0781:5583") that are always allowed.
+	AllowedDevices []string `protobuf:"bytes,3,rep,name=allowed_devices,json=allowedDevices,proto3" json:"allowed_devices,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *DeviceControlPolicy) Reset() {
+	*x = DeviceControlPolicy{}
+	mi := &file_xdr_v1_agent_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeviceControlPolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeviceControlPolicy) ProtoMessage() {}
+
+func (x *DeviceControlPolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_xdr_v1_agent_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeviceControlPolicy.ProtoReflect.Descriptor instead.
+func (*DeviceControlPolicy) Descriptor() ([]byte, []int) {
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *DeviceControlPolicy) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *DeviceControlPolicy) GetUsbStorage() string {
+	if x != nil {
+		return x.UsbStorage
+	}
+	return ""
+}
+
+func (x *DeviceControlPolicy) GetAllowedDevices() []string {
+	if x != nil {
+		return x.AllowedDevices
+	}
+	return nil
+}
+
+// Which telemetry the agent sends. Prevention and detection events are
+// always sent.
+type ActivityMonitoringPolicy struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Process       bool                   `protobuf:"varint,1,opt,name=process,proto3" json:"process,omitempty"`
+	File          bool                   `protobuf:"varint,2,opt,name=file,proto3" json:"file,omitempty"`
+	Network       bool                   `protobuf:"varint,3,opt,name=network,proto3" json:"network,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ActivityMonitoringPolicy) Reset() {
+	*x = ActivityMonitoringPolicy{}
+	mi := &file_xdr_v1_agent_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ActivityMonitoringPolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ActivityMonitoringPolicy) ProtoMessage() {}
+
+func (x *ActivityMonitoringPolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_xdr_v1_agent_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ActivityMonitoringPolicy.ProtoReflect.Descriptor instead.
+func (*ActivityMonitoringPolicy) Descriptor() ([]byte, []int) {
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ActivityMonitoringPolicy) GetProcess() bool {
+	if x != nil {
+		return x.Process
+	}
+	return false
+}
+
+func (x *ActivityMonitoringPolicy) GetFile() bool {
+	if x != nil {
+		return x.File
+	}
+	return false
+}
+
+func (x *ActivityMonitoringPolicy) GetNetwork() bool {
+	if x != nil {
+		return x.Network
+	}
+	return false
+}
+
+type ApplicationControlPolicy struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Enabled bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	// Deny execution of matching files; otherwise only report it.
+	Block bool `protobuf:"varint,2,opt,name=block,proto3" json:"block,omitempty"`
+	// Path prefixes, or globs when they contain * ? or [.
+	BlockedPaths  []string `protobuf:"bytes,3,rep,name=blocked_paths,json=blockedPaths,proto3" json:"blocked_paths,omitempty"`
+	BlockedSha256 []string `protobuf:"bytes,4,rep,name=blocked_sha256,json=blockedSha256,proto3" json:"blocked_sha256,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApplicationControlPolicy) Reset() {
+	*x = ApplicationControlPolicy{}
+	mi := &file_xdr_v1_agent_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApplicationControlPolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApplicationControlPolicy) ProtoMessage() {}
+
+func (x *ApplicationControlPolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_xdr_v1_agent_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApplicationControlPolicy.ProtoReflect.Descriptor instead.
+func (*ApplicationControlPolicy) Descriptor() ([]byte, []int) {
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ApplicationControlPolicy) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *ApplicationControlPolicy) GetBlock() bool {
+	if x != nil {
+		return x.Block
+	}
+	return false
+}
+
+func (x *ApplicationControlPolicy) GetBlockedPaths() []string {
+	if x != nil {
+		return x.BlockedPaths
+	}
+	return nil
+}
+
+func (x *ApplicationControlPolicy) GetBlockedSha256() []string {
+	if x != nil {
+		return x.BlockedSha256
+	}
+	return nil
+}
+
 // File integrity monitoring: a baseline of hashes, owners and modes for the
 // paths, compared on file events and on a full rescan every interval.
 type FimPolicy struct {
@@ -742,7 +1240,7 @@ type FimPolicy struct {
 
 func (x *FimPolicy) Reset() {
 	*x = FimPolicy{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[7]
+	mi := &file_xdr_v1_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -754,7 +1252,7 @@ func (x *FimPolicy) String() string {
 func (*FimPolicy) ProtoMessage() {}
 
 func (x *FimPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[7]
+	mi := &file_xdr_v1_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -767,7 +1265,7 @@ func (x *FimPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FimPolicy.ProtoReflect.Descriptor instead.
 func (*FimPolicy) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{7}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *FimPolicy) GetEnabled() bool {
@@ -812,7 +1310,7 @@ type FirewallPolicy struct {
 
 func (x *FirewallPolicy) Reset() {
 	*x = FirewallPolicy{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[8]
+	mi := &file_xdr_v1_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -824,7 +1322,7 @@ func (x *FirewallPolicy) String() string {
 func (*FirewallPolicy) ProtoMessage() {}
 
 func (x *FirewallPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[8]
+	mi := &file_xdr_v1_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -837,7 +1335,7 @@ func (x *FirewallPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FirewallPolicy.ProtoReflect.Descriptor instead.
 func (*FirewallPolicy) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{8}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *FirewallPolicy) GetEnabled() bool {
@@ -880,7 +1378,7 @@ type FirewallRule struct {
 
 func (x *FirewallRule) Reset() {
 	*x = FirewallRule{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[9]
+	mi := &file_xdr_v1_agent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -892,7 +1390,7 @@ func (x *FirewallRule) String() string {
 func (*FirewallRule) ProtoMessage() {}
 
 func (x *FirewallRule) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[9]
+	mi := &file_xdr_v1_agent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -905,7 +1403,7 @@ func (x *FirewallRule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FirewallRule.ProtoReflect.Descriptor instead.
 func (*FirewallRule) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{9}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *FirewallRule) GetDirection() string {
@@ -959,14 +1457,24 @@ type PreventionState struct {
 	FimFiles        uint32                 `protobuf:"varint,4,opt,name=fim_files,json=fimFiles,proto3" json:"fim_files,omitempty"`
 	FirewallApplied bool                   `protobuf:"varint,5,opt,name=firewall_applied,json=firewallApplied,proto3" json:"firewall_applied,omitempty"`
 	// Why part of the policy could not be applied, if it could not.
-	Error         string `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Error        string `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	PolicyName   string `protobuf:"bytes,7,opt,name=policy_name,json=policyName,proto3" json:"policy_name,omitempty"`
+	RealtimeScan bool   `protobuf:"varint,8,opt,name=realtime_scan,json=realtimeScan,proto3" json:"realtime_scan,omitempty"`
+	// Addresses on the web reputation block list.
+	WebReputationAddrs    uint32 `protobuf:"varint,9,opt,name=web_reputation_addrs,json=webReputationAddrs,proto3" json:"web_reputation_addrs,omitempty"`
+	WebReputationBlocking bool   `protobuf:"varint,10,opt,name=web_reputation_blocking,json=webReputationBlocking,proto3" json:"web_reputation_blocking,omitempty"`
+	IntrusionPrevention   bool   `protobuf:"varint,11,opt,name=intrusion_prevention,json=intrusionPrevention,proto3" json:"intrusion_prevention,omitempty"`
+	BannedAddrs           uint32 `protobuf:"varint,12,opt,name=banned_addrs,json=bannedAddrs,proto3" json:"banned_addrs,omitempty"`
+	DeviceControl         bool   `protobuf:"varint,13,opt,name=device_control,json=deviceControl,proto3" json:"device_control,omitempty"`
+	BlockedDevices        uint32 `protobuf:"varint,14,opt,name=blocked_devices,json=blockedDevices,proto3" json:"blocked_devices,omitempty"`
+	AppControl            bool   `protobuf:"varint,15,opt,name=app_control,json=appControl,proto3" json:"app_control,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *PreventionState) Reset() {
 	*x = PreventionState{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[10]
+	mi := &file_xdr_v1_agent_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -978,7 +1486,7 @@ func (x *PreventionState) String() string {
 func (*PreventionState) ProtoMessage() {}
 
 func (x *PreventionState) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[10]
+	mi := &file_xdr_v1_agent_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -991,7 +1499,7 @@ func (x *PreventionState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PreventionState.ProtoReflect.Descriptor instead.
 func (*PreventionState) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{10}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *PreventionState) GetExecBlocking() bool {
@@ -1036,6 +1544,69 @@ func (x *PreventionState) GetError() string {
 	return ""
 }
 
+func (x *PreventionState) GetPolicyName() string {
+	if x != nil {
+		return x.PolicyName
+	}
+	return ""
+}
+
+func (x *PreventionState) GetRealtimeScan() bool {
+	if x != nil {
+		return x.RealtimeScan
+	}
+	return false
+}
+
+func (x *PreventionState) GetWebReputationAddrs() uint32 {
+	if x != nil {
+		return x.WebReputationAddrs
+	}
+	return 0
+}
+
+func (x *PreventionState) GetWebReputationBlocking() bool {
+	if x != nil {
+		return x.WebReputationBlocking
+	}
+	return false
+}
+
+func (x *PreventionState) GetIntrusionPrevention() bool {
+	if x != nil {
+		return x.IntrusionPrevention
+	}
+	return false
+}
+
+func (x *PreventionState) GetBannedAddrs() uint32 {
+	if x != nil {
+		return x.BannedAddrs
+	}
+	return 0
+}
+
+func (x *PreventionState) GetDeviceControl() bool {
+	if x != nil {
+		return x.DeviceControl
+	}
+	return false
+}
+
+func (x *PreventionState) GetBlockedDevices() uint32 {
+	if x != nil {
+		return x.BlockedDevices
+	}
+	return 0
+}
+
+func (x *PreventionState) GetAppControl() bool {
+	if x != nil {
+		return x.AppControl
+	}
+	return false
+}
+
 type PamPolicy struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Record every sudo session on the host, not only just-in-time grants.
@@ -1046,7 +1617,7 @@ type PamPolicy struct {
 
 func (x *PamPolicy) Reset() {
 	*x = PamPolicy{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[11]
+	mi := &file_xdr_v1_agent_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1058,7 +1629,7 @@ func (x *PamPolicy) String() string {
 func (*PamPolicy) ProtoMessage() {}
 
 func (x *PamPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[11]
+	mi := &file_xdr_v1_agent_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1071,7 +1642,7 @@ func (x *PamPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PamPolicy.ProtoReflect.Descriptor instead.
 func (*PamPolicy) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{11}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *PamPolicy) GetRecordAllSudo() bool {
@@ -1092,7 +1663,7 @@ type TamperPolicy struct {
 
 func (x *TamperPolicy) Reset() {
 	*x = TamperPolicy{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[12]
+	mi := &file_xdr_v1_agent_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1104,7 +1675,7 @@ func (x *TamperPolicy) String() string {
 func (*TamperPolicy) ProtoMessage() {}
 
 func (x *TamperPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[12]
+	mi := &file_xdr_v1_agent_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1117,7 +1688,7 @@ func (x *TamperPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TamperPolicy.ProtoReflect.Descriptor instead.
 func (*TamperPolicy) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{12}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *TamperPolicy) GetEnabled() bool {
@@ -1145,7 +1716,7 @@ type AgentCommand struct {
 
 func (x *AgentCommand) Reset() {
 	*x = AgentCommand{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[13]
+	mi := &file_xdr_v1_agent_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1157,7 +1728,7 @@ func (x *AgentCommand) String() string {
 func (*AgentCommand) ProtoMessage() {}
 
 func (x *AgentCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[13]
+	mi := &file_xdr_v1_agent_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1170,7 +1741,7 @@ func (x *AgentCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentCommand.ProtoReflect.Descriptor instead.
 func (*AgentCommand) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{13}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *AgentCommand) GetId() string {
@@ -1205,7 +1776,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[14]
+	mi := &file_xdr_v1_agent_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1217,7 +1788,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[14]
+	mi := &file_xdr_v1_agent_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1230,7 +1801,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{14}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *CommandResult) GetCommandId() string {
@@ -1262,7 +1833,7 @@ type CommandResultAck struct {
 
 func (x *CommandResultAck) Reset() {
 	*x = CommandResultAck{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[15]
+	mi := &file_xdr_v1_agent_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1274,7 +1845,7 @@ func (x *CommandResultAck) String() string {
 func (*CommandResultAck) ProtoMessage() {}
 
 func (x *CommandResultAck) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[15]
+	mi := &file_xdr_v1_agent_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1287,7 +1858,7 @@ func (x *CommandResultAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResultAck.ProtoReflect.Descriptor instead.
 func (*CommandResultAck) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{15}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{21}
 }
 
 type DetectionContentRequest struct {
@@ -1298,7 +1869,7 @@ type DetectionContentRequest struct {
 
 func (x *DetectionContentRequest) Reset() {
 	*x = DetectionContentRequest{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[16]
+	mi := &file_xdr_v1_agent_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1310,7 +1881,7 @@ func (x *DetectionContentRequest) String() string {
 func (*DetectionContentRequest) ProtoMessage() {}
 
 func (x *DetectionContentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[16]
+	mi := &file_xdr_v1_agent_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1323,7 +1894,7 @@ func (x *DetectionContentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetectionContentRequest.ProtoReflect.Descriptor instead.
 func (*DetectionContentRequest) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{16}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{22}
 }
 
 type DetectionContent struct {
@@ -1333,13 +1904,16 @@ type DetectionContent struct {
 	YaraRules string `protobuf:"bytes,2,opt,name=yara_rules,json=yaraRules,proto3" json:"yara_rules,omitempty"`
 	// SHA-256 hash IOCs as concatenated 32-byte digests, for exec blocking.
 	BlockedSha256 []byte `protobuf:"bytes,3,opt,name=blocked_sha256,json=blockedSha256,proto3" json:"blocked_sha256,omitempty"`
+	// IP (or CIDR) and domain IOCs, for web reputation.
+	BadIps        []string `protobuf:"bytes,4,rep,name=bad_ips,json=badIps,proto3" json:"bad_ips,omitempty"`
+	BadDomains    []string `protobuf:"bytes,5,rep,name=bad_domains,json=badDomains,proto3" json:"bad_domains,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DetectionContent) Reset() {
 	*x = DetectionContent{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[17]
+	mi := &file_xdr_v1_agent_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1351,7 +1925,7 @@ func (x *DetectionContent) String() string {
 func (*DetectionContent) ProtoMessage() {}
 
 func (x *DetectionContent) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[17]
+	mi := &file_xdr_v1_agent_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1364,7 +1938,7 @@ func (x *DetectionContent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetectionContent.ProtoReflect.Descriptor instead.
 func (*DetectionContent) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{17}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *DetectionContent) GetVersion() string {
@@ -1388,6 +1962,20 @@ func (x *DetectionContent) GetBlockedSha256() []byte {
 	return nil
 }
 
+func (x *DetectionContent) GetBadIps() []string {
+	if x != nil {
+		return x.BadIps
+	}
+	return nil
+}
+
+func (x *DetectionContent) GetBadDomains() []string {
+	if x != nil {
+		return x.BadDomains
+	}
+	return nil
+}
+
 type AgentBinaryRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Arch          string                 `protobuf:"bytes,1,opt,name=arch,proto3" json:"arch,omitempty"`
@@ -1398,7 +1986,7 @@ type AgentBinaryRequest struct {
 
 func (x *AgentBinaryRequest) Reset() {
 	*x = AgentBinaryRequest{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[18]
+	mi := &file_xdr_v1_agent_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1410,7 +1998,7 @@ func (x *AgentBinaryRequest) String() string {
 func (*AgentBinaryRequest) ProtoMessage() {}
 
 func (x *AgentBinaryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[18]
+	mi := &file_xdr_v1_agent_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1423,7 +2011,7 @@ func (x *AgentBinaryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentBinaryRequest.ProtoReflect.Descriptor instead.
 func (*AgentBinaryRequest) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{18}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *AgentBinaryRequest) GetArch() string {
@@ -1451,7 +2039,7 @@ type AgentBinaryChunk struct {
 
 func (x *AgentBinaryChunk) Reset() {
 	*x = AgentBinaryChunk{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[19]
+	mi := &file_xdr_v1_agent_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1463,7 +2051,7 @@ func (x *AgentBinaryChunk) String() string {
 func (*AgentBinaryChunk) ProtoMessage() {}
 
 func (x *AgentBinaryChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[19]
+	mi := &file_xdr_v1_agent_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1476,7 +2064,7 @@ func (x *AgentBinaryChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentBinaryChunk.ProtoReflect.Descriptor instead.
 func (*AgentBinaryChunk) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{19}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *AgentBinaryChunk) GetData() []byte {
@@ -1509,7 +2097,7 @@ type EventBatch struct {
 
 func (x *EventBatch) Reset() {
 	*x = EventBatch{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[20]
+	mi := &file_xdr_v1_agent_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1521,7 +2109,7 @@ func (x *EventBatch) String() string {
 func (*EventBatch) ProtoMessage() {}
 
 func (x *EventBatch) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[20]
+	mi := &file_xdr_v1_agent_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1534,7 +2122,7 @@ func (x *EventBatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventBatch.ProtoReflect.Descriptor instead.
 func (*EventBatch) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{20}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *EventBatch) GetEvents() []*Event {
@@ -1553,7 +2141,7 @@ type SendEventsResponse struct {
 
 func (x *SendEventsResponse) Reset() {
 	*x = SendEventsResponse{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[21]
+	mi := &file_xdr_v1_agent_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1565,7 +2153,7 @@ func (x *SendEventsResponse) String() string {
 func (*SendEventsResponse) ProtoMessage() {}
 
 func (x *SendEventsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[21]
+	mi := &file_xdr_v1_agent_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1578,7 +2166,7 @@ func (x *SendEventsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendEventsResponse.ProtoReflect.Descriptor instead.
 func (*SendEventsResponse) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{21}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *SendEventsResponse) GetAccepted() uint64 {
@@ -1600,6 +2188,7 @@ type Event struct {
 	//	*Event_Network
 	//	*Event_Yara
 	//	*Event_Tamper
+	//	*Event_Policy
 	Payload       isEvent_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1607,7 +2196,7 @@ type Event struct {
 
 func (x *Event) Reset() {
 	*x = Event{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[22]
+	mi := &file_xdr_v1_agent_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1619,7 +2208,7 @@ func (x *Event) String() string {
 func (*Event) ProtoMessage() {}
 
 func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[22]
+	mi := &file_xdr_v1_agent_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1632,7 +2221,7 @@ func (x *Event) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Event.ProtoReflect.Descriptor instead.
 func (*Event) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{22}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *Event) GetId() string {
@@ -1708,6 +2297,15 @@ func (x *Event) GetTamper() *TamperEvent {
 	return nil
 }
 
+func (x *Event) GetPolicy() *PolicyEvent {
+	if x != nil {
+		if x, ok := x.Payload.(*Event_Policy); ok {
+			return x.Policy
+		}
+	}
+	return nil
+}
+
 type isEvent_Payload interface {
 	isEvent_Payload()
 }
@@ -1732,6 +2330,10 @@ type Event_Tamper struct {
 	Tamper *TamperEvent `protobuf:"bytes,14,opt,name=tamper,proto3,oneof"`
 }
 
+type Event_Policy struct {
+	Policy *PolicyEvent `protobuf:"bytes,15,opt,name=policy,proto3,oneof"`
+}
+
 func (*Event_Process) isEvent_Payload() {}
 
 func (*Event_File) isEvent_Payload() {}
@@ -1741,6 +2343,8 @@ func (*Event_Network) isEvent_Payload() {}
 func (*Event_Yara) isEvent_Payload() {}
 
 func (*Event_Tamper) isEvent_Payload() {}
+
+func (*Event_Policy) isEvent_Payload() {}
 
 type ProcessEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1761,7 +2365,7 @@ type ProcessEvent struct {
 
 func (x *ProcessEvent) Reset() {
 	*x = ProcessEvent{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[23]
+	mi := &file_xdr_v1_agent_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1773,7 +2377,7 @@ func (x *ProcessEvent) String() string {
 func (*ProcessEvent) ProtoMessage() {}
 
 func (x *ProcessEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[23]
+	mi := &file_xdr_v1_agent_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1786,7 +2390,7 @@ func (x *ProcessEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessEvent.ProtoReflect.Descriptor instead.
 func (*ProcessEvent) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{23}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ProcessEvent) GetPid() uint32 {
@@ -1890,7 +2494,7 @@ type FileEvent struct {
 
 func (x *FileEvent) Reset() {
 	*x = FileEvent{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[24]
+	mi := &file_xdr_v1_agent_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1902,7 +2506,7 @@ func (x *FileEvent) String() string {
 func (*FileEvent) ProtoMessage() {}
 
 func (x *FileEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[24]
+	mi := &file_xdr_v1_agent_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1915,7 +2519,7 @@ func (x *FileEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileEvent.ProtoReflect.Descriptor instead.
 func (*FileEvent) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{24}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *FileEvent) GetPath() string {
@@ -2018,7 +2622,7 @@ type NetworkEvent struct {
 
 func (x *NetworkEvent) Reset() {
 	*x = NetworkEvent{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[25]
+	mi := &file_xdr_v1_agent_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2030,7 +2634,7 @@ func (x *NetworkEvent) String() string {
 func (*NetworkEvent) ProtoMessage() {}
 
 func (x *NetworkEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[25]
+	mi := &file_xdr_v1_agent_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2043,7 +2647,7 @@ func (x *NetworkEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkEvent.ProtoReflect.Descriptor instead.
 func (*NetworkEvent) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{25}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *NetworkEvent) GetProtocol() string {
@@ -2108,15 +2712,17 @@ type YaraMatch struct {
 	Sha256 string                 `protobuf:"bytes,2,opt,name=sha256,proto3" json:"sha256,omitempty"`
 	Rules  []string               `protobuf:"bytes,3,rep,name=rules,proto3" json:"rules,omitempty"`
 	// The process whose binary matched, when the scan came from an exec.
-	Pid           uint32 `protobuf:"varint,4,opt,name=pid,proto3" json:"pid,omitempty"`
-	Size          uint64 `protobuf:"varint,5,opt,name=size,proto3" json:"size,omitempty"`
+	Pid  uint32 `protobuf:"varint,4,opt,name=pid,proto3" json:"pid,omitempty"`
+	Size uint64 `protobuf:"varint,5,opt,name=size,proto3" json:"size,omitempty"`
+	// "quarantined" when anti-malware moved the file away.
+	Action        string `protobuf:"bytes,6,opt,name=action,proto3" json:"action,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *YaraMatch) Reset() {
 	*x = YaraMatch{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[26]
+	mi := &file_xdr_v1_agent_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2128,7 +2734,7 @@ func (x *YaraMatch) String() string {
 func (*YaraMatch) ProtoMessage() {}
 
 func (x *YaraMatch) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[26]
+	mi := &file_xdr_v1_agent_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2141,7 +2747,7 @@ func (x *YaraMatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use YaraMatch.ProtoReflect.Descriptor instead.
 func (*YaraMatch) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{26}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *YaraMatch) GetPath() string {
@@ -2179,6 +2785,13 @@ func (x *YaraMatch) GetSize() uint64 {
 	return 0
 }
 
+func (x *YaraMatch) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
 // Something tried to stop, change or remove the agent, or protection changed.
 type TamperEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -2193,7 +2806,7 @@ type TamperEvent struct {
 
 func (x *TamperEvent) Reset() {
 	*x = TamperEvent{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[27]
+	mi := &file_xdr_v1_agent_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2205,7 +2818,7 @@ func (x *TamperEvent) String() string {
 func (*TamperEvent) ProtoMessage() {}
 
 func (x *TamperEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[27]
+	mi := &file_xdr_v1_agent_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2218,7 +2831,7 @@ func (x *TamperEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TamperEvent.ProtoReflect.Descriptor instead.
 func (*TamperEvent) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{27}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *TamperEvent) GetAction() string {
@@ -2249,6 +2862,100 @@ func (x *TamperEvent) GetExe() string {
 	return ""
 }
 
+// What a policy module saw or did.
+type PolicyEvent struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// blocked, detected, banned or connected.
+	Action        string `protobuf:"bytes,1,opt,name=action,proto3" json:"action,omitempty"`
+	Detail        string `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
+	RemoteAddr    string `protobuf:"bytes,3,opt,name=remote_addr,json=remoteAddr,proto3" json:"remote_addr,omitempty"`
+	Pid           uint32 `protobuf:"varint,4,opt,name=pid,proto3" json:"pid,omitempty"`
+	Exe           string `protobuf:"bytes,5,opt,name=exe,proto3" json:"exe,omitempty"`
+	Sha256        string `protobuf:"bytes,6,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	User          string `protobuf:"bytes,7,opt,name=user,proto3" json:"user,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PolicyEvent) Reset() {
+	*x = PolicyEvent{}
+	mi := &file_xdr_v1_agent_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PolicyEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PolicyEvent) ProtoMessage() {}
+
+func (x *PolicyEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_xdr_v1_agent_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PolicyEvent.ProtoReflect.Descriptor instead.
+func (*PolicyEvent) Descriptor() ([]byte, []int) {
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *PolicyEvent) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *PolicyEvent) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+func (x *PolicyEvent) GetRemoteAddr() string {
+	if x != nil {
+		return x.RemoteAddr
+	}
+	return ""
+}
+
+func (x *PolicyEvent) GetPid() uint32 {
+	if x != nil {
+		return x.Pid
+	}
+	return 0
+}
+
+func (x *PolicyEvent) GetExe() string {
+	if x != nil {
+		return x.Exe
+	}
+	return ""
+}
+
+func (x *PolicyEvent) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
+func (x *PolicyEvent) GetUser() string {
+	if x != nil {
+		return x.User
+	}
+	return ""
+}
+
 type ElevationRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The local account, identified by the agent from the socket peer.
@@ -2262,7 +2969,7 @@ type ElevationRequest struct {
 
 func (x *ElevationRequest) Reset() {
 	*x = ElevationRequest{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[28]
+	mi := &file_xdr_v1_agent_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2274,7 +2981,7 @@ func (x *ElevationRequest) String() string {
 func (*ElevationRequest) ProtoMessage() {}
 
 func (x *ElevationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[28]
+	mi := &file_xdr_v1_agent_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2287,7 +2994,7 @@ func (x *ElevationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ElevationRequest.ProtoReflect.Descriptor instead.
 func (*ElevationRequest) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{28}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ElevationRequest) GetUser() string {
@@ -2327,7 +3034,7 @@ type GetElevationRequest struct {
 
 func (x *GetElevationRequest) Reset() {
 	*x = GetElevationRequest{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[29]
+	mi := &file_xdr_v1_agent_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2339,7 +3046,7 @@ func (x *GetElevationRequest) String() string {
 func (*GetElevationRequest) ProtoMessage() {}
 
 func (x *GetElevationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[29]
+	mi := &file_xdr_v1_agent_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2352,7 +3059,7 @@ func (x *GetElevationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetElevationRequest.ProtoReflect.Descriptor instead.
 func (*GetElevationRequest) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{29}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *GetElevationRequest) GetId() string {
@@ -2375,7 +3082,7 @@ type ElevationStatus struct {
 
 func (x *ElevationStatus) Reset() {
 	*x = ElevationStatus{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[30]
+	mi := &file_xdr_v1_agent_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2387,7 +3094,7 @@ func (x *ElevationStatus) String() string {
 func (*ElevationStatus) ProtoMessage() {}
 
 func (x *ElevationStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[30]
+	mi := &file_xdr_v1_agent_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2400,7 +3107,7 @@ func (x *ElevationStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ElevationStatus.ProtoReflect.Descriptor instead.
 func (*ElevationStatus) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{30}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ElevationStatus) GetId() string {
@@ -2454,7 +3161,7 @@ type PrivilegedAccount struct {
 
 func (x *PrivilegedAccount) Reset() {
 	*x = PrivilegedAccount{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[31]
+	mi := &file_xdr_v1_agent_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2466,7 +3173,7 @@ func (x *PrivilegedAccount) String() string {
 func (*PrivilegedAccount) ProtoMessage() {}
 
 func (x *PrivilegedAccount) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[31]
+	mi := &file_xdr_v1_agent_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2479,7 +3186,7 @@ func (x *PrivilegedAccount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PrivilegedAccount.ProtoReflect.Descriptor instead.
 func (*PrivilegedAccount) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{31}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *PrivilegedAccount) GetName() string {
@@ -2577,7 +3284,7 @@ type PrivilegedAccounts struct {
 
 func (x *PrivilegedAccounts) Reset() {
 	*x = PrivilegedAccounts{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[32]
+	mi := &file_xdr_v1_agent_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2589,7 +3296,7 @@ func (x *PrivilegedAccounts) String() string {
 func (*PrivilegedAccounts) ProtoMessage() {}
 
 func (x *PrivilegedAccounts) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[32]
+	mi := &file_xdr_v1_agent_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2602,7 +3309,7 @@ func (x *PrivilegedAccounts) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PrivilegedAccounts.ProtoReflect.Descriptor instead.
 func (*PrivilegedAccounts) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{32}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *PrivilegedAccounts) GetAccounts() []*PrivilegedAccount {
@@ -2627,7 +3334,7 @@ type PrivilegedAccountsAck struct {
 
 func (x *PrivilegedAccountsAck) Reset() {
 	*x = PrivilegedAccountsAck{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[33]
+	mi := &file_xdr_v1_agent_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2639,7 +3346,7 @@ func (x *PrivilegedAccountsAck) String() string {
 func (*PrivilegedAccountsAck) ProtoMessage() {}
 
 func (x *PrivilegedAccountsAck) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[33]
+	mi := &file_xdr_v1_agent_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2652,7 +3359,7 @@ func (x *PrivilegedAccountsAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PrivilegedAccountsAck.ProtoReflect.Descriptor instead.
 func (*PrivilegedAccountsAck) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{33}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{40}
 }
 
 type SessionRecording struct {
@@ -2677,7 +3384,7 @@ type SessionRecording struct {
 
 func (x *SessionRecording) Reset() {
 	*x = SessionRecording{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[34]
+	mi := &file_xdr_v1_agent_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2689,7 +3396,7 @@ func (x *SessionRecording) String() string {
 func (*SessionRecording) ProtoMessage() {}
 
 func (x *SessionRecording) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[34]
+	mi := &file_xdr_v1_agent_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2702,7 +3409,7 @@ func (x *SessionRecording) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionRecording.ProtoReflect.Descriptor instead.
 func (*SessionRecording) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{34}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *SessionRecording) GetSessionId() string {
@@ -2790,7 +3497,7 @@ type SessionRecordingAck struct {
 
 func (x *SessionRecordingAck) Reset() {
 	*x = SessionRecordingAck{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[35]
+	mi := &file_xdr_v1_agent_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2802,7 +3509,7 @@ func (x *SessionRecordingAck) String() string {
 func (*SessionRecordingAck) ProtoMessage() {}
 
 func (x *SessionRecordingAck) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[35]
+	mi := &file_xdr_v1_agent_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2815,7 +3522,7 @@ func (x *SessionRecordingAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionRecordingAck.ProtoReflect.Descriptor instead.
 func (*SessionRecordingAck) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{35}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{42}
 }
 
 // Console to agent, on the live stream.
@@ -2835,7 +3542,7 @@ type LiveDown struct {
 
 func (x *LiveDown) Reset() {
 	*x = LiveDown{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[36]
+	mi := &file_xdr_v1_agent_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2847,7 +3554,7 @@ func (x *LiveDown) String() string {
 func (*LiveDown) ProtoMessage() {}
 
 func (x *LiveDown) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[36]
+	mi := &file_xdr_v1_agent_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2860,7 +3567,7 @@ func (x *LiveDown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LiveDown.ProtoReflect.Descriptor instead.
 func (*LiveDown) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{36}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *LiveDown) GetMsg() isLiveDown_Msg {
@@ -2964,7 +3671,7 @@ type LiveUp struct {
 
 func (x *LiveUp) Reset() {
 	*x = LiveUp{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[37]
+	mi := &file_xdr_v1_agent_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2976,7 +3683,7 @@ func (x *LiveUp) String() string {
 func (*LiveUp) ProtoMessage() {}
 
 func (x *LiveUp) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[37]
+	mi := &file_xdr_v1_agent_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2989,7 +3696,7 @@ func (x *LiveUp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LiveUp.ProtoReflect.Descriptor instead.
 func (*LiveUp) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{37}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *LiveUp) GetMsg() isLiveUp_Msg {
@@ -3061,7 +3768,7 @@ type ShellOpen struct {
 
 func (x *ShellOpen) Reset() {
 	*x = ShellOpen{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[38]
+	mi := &file_xdr_v1_agent_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3073,7 +3780,7 @@ func (x *ShellOpen) String() string {
 func (*ShellOpen) ProtoMessage() {}
 
 func (x *ShellOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[38]
+	mi := &file_xdr_v1_agent_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3086,7 +3793,7 @@ func (x *ShellOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellOpen.ProtoReflect.Descriptor instead.
 func (*ShellOpen) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{38}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *ShellOpen) GetSessionId() string {
@@ -3127,7 +3834,7 @@ type ShellData struct {
 
 func (x *ShellData) Reset() {
 	*x = ShellData{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[39]
+	mi := &file_xdr_v1_agent_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3139,7 +3846,7 @@ func (x *ShellData) String() string {
 func (*ShellData) ProtoMessage() {}
 
 func (x *ShellData) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[39]
+	mi := &file_xdr_v1_agent_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3152,7 +3859,7 @@ func (x *ShellData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellData.ProtoReflect.Descriptor instead.
 func (*ShellData) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{39}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *ShellData) GetSessionId() string {
@@ -3180,7 +3887,7 @@ type ShellResize struct {
 
 func (x *ShellResize) Reset() {
 	*x = ShellResize{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[40]
+	mi := &file_xdr_v1_agent_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3192,7 +3899,7 @@ func (x *ShellResize) String() string {
 func (*ShellResize) ProtoMessage() {}
 
 func (x *ShellResize) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[40]
+	mi := &file_xdr_v1_agent_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3205,7 +3912,7 @@ func (x *ShellResize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellResize.ProtoReflect.Descriptor instead.
 func (*ShellResize) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{40}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *ShellResize) GetSessionId() string {
@@ -3238,7 +3945,7 @@ type ShellClose struct {
 
 func (x *ShellClose) Reset() {
 	*x = ShellClose{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[41]
+	mi := &file_xdr_v1_agent_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3250,7 +3957,7 @@ func (x *ShellClose) String() string {
 func (*ShellClose) ProtoMessage() {}
 
 func (x *ShellClose) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[41]
+	mi := &file_xdr_v1_agent_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3263,7 +3970,7 @@ func (x *ShellClose) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellClose.ProtoReflect.Descriptor instead.
 func (*ShellClose) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{41}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *ShellClose) GetSessionId() string {
@@ -3285,7 +3992,7 @@ type ShellExit struct {
 
 func (x *ShellExit) Reset() {
 	*x = ShellExit{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[42]
+	mi := &file_xdr_v1_agent_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3297,7 +4004,7 @@ func (x *ShellExit) String() string {
 func (*ShellExit) ProtoMessage() {}
 
 func (x *ShellExit) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[42]
+	mi := &file_xdr_v1_agent_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3310,7 +4017,7 @@ func (x *ShellExit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellExit.ProtoReflect.Descriptor instead.
 func (*ShellExit) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{42}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ShellExit) GetSessionId() string {
@@ -3343,7 +4050,7 @@ type ActivityRequest struct {
 
 func (x *ActivityRequest) Reset() {
 	*x = ActivityRequest{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[43]
+	mi := &file_xdr_v1_agent_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3355,7 +4062,7 @@ func (x *ActivityRequest) String() string {
 func (*ActivityRequest) ProtoMessage() {}
 
 func (x *ActivityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[43]
+	mi := &file_xdr_v1_agent_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3368,7 +4075,7 @@ func (x *ActivityRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActivityRequest.ProtoReflect.Descriptor instead.
 func (*ActivityRequest) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{43}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ActivityRequest) GetRequestId() string {
@@ -3395,7 +4102,7 @@ type Activity struct {
 
 func (x *Activity) Reset() {
 	*x = Activity{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[44]
+	mi := &file_xdr_v1_agent_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3407,7 +4114,7 @@ func (x *Activity) String() string {
 func (*Activity) ProtoMessage() {}
 
 func (x *Activity) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[44]
+	mi := &file_xdr_v1_agent_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3420,7 +4127,7 @@ func (x *Activity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Activity.ProtoReflect.Descriptor instead.
 func (*Activity) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{44}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *Activity) GetRequestId() string {
@@ -3494,7 +4201,7 @@ type TerminalSession struct {
 
 func (x *TerminalSession) Reset() {
 	*x = TerminalSession{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[45]
+	mi := &file_xdr_v1_agent_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3506,7 +4213,7 @@ func (x *TerminalSession) String() string {
 func (*TerminalSession) ProtoMessage() {}
 
 func (x *TerminalSession) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[45]
+	mi := &file_xdr_v1_agent_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3519,7 +4226,7 @@ func (x *TerminalSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TerminalSession.ProtoReflect.Descriptor instead.
 func (*TerminalSession) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{45}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *TerminalSession) GetTty() string {
@@ -3594,7 +4301,7 @@ type LiveProcess struct {
 
 func (x *LiveProcess) Reset() {
 	*x = LiveProcess{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[46]
+	mi := &file_xdr_v1_agent_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3606,7 +4313,7 @@ func (x *LiveProcess) String() string {
 func (*LiveProcess) ProtoMessage() {}
 
 func (x *LiveProcess) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[46]
+	mi := &file_xdr_v1_agent_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3619,7 +4326,7 @@ func (x *LiveProcess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LiveProcess.ProtoReflect.Descriptor instead.
 func (*LiveProcess) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{46}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *LiveProcess) GetPid() uint32 {
@@ -3728,12 +4435,52 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"\x03pam\x18\x05 \x01(\v2\x11.xdr.v1.PamPolicyR\x03pam\x128\n" +
 	"\n" +
 	"prevention\x18\x06 \x01(\v2\x18.xdr.v1.PreventionPolicyR\n" +
-	"prevention\"\x8a\x01\n" +
+	"prevention\"\xe0\x04\n" +
 	"\x10PreventionPolicy\x12\x1d\n" +
 	"\n" +
 	"block_exec\x18\x01 \x01(\bR\tblockExec\x12#\n" +
 	"\x03fim\x18\x02 \x01(\v2\x11.xdr.v1.FimPolicyR\x03fim\x122\n" +
-	"\bfirewall\x18\x03 \x01(\v2\x16.xdr.v1.FirewallPolicyR\bfirewall\"\x80\x01\n" +
+	"\bfirewall\x18\x03 \x01(\v2\x16.xdr.v1.FirewallPolicyR\bfirewall\x12<\n" +
+	"\fanti_malware\x18\x04 \x01(\v2\x19.xdr.v1.AntiMalwarePolicyR\vantiMalware\x12B\n" +
+	"\x0eweb_reputation\x18\x05 \x01(\v2\x1b.xdr.v1.WebReputationPolicyR\rwebReputation\x12T\n" +
+	"\x14intrusion_prevention\x18\x06 \x01(\v2!.xdr.v1.IntrusionPreventionPolicyR\x13intrusionPrevention\x12B\n" +
+	"\x0edevice_control\x18\a \x01(\v2\x1b.xdr.v1.DeviceControlPolicyR\rdeviceControl\x12Q\n" +
+	"\x13activity_monitoring\x18\b \x01(\v2 .xdr.v1.ActivityMonitoringPolicyR\x12activityMonitoring\x12Q\n" +
+	"\x13application_control\x18\t \x01(\v2 .xdr.v1.ApplicationControlPolicyR\x12applicationControl\x12\x12\n" +
+	"\x04name\x18\n" +
+	" \x01(\tR\x04name\"~\n" +
+	"\x11AntiMalwarePolicy\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12&\n" +
+	"\x0fblock_known_bad\x18\x02 \x01(\bR\rblockKnownBad\x12'\n" +
+	"\x0fauto_quarantine\x18\x03 \x01(\bR\x0eautoQuarantine\"\xc1\x01\n" +
+	"\x13WebReputationPolicy\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x14\n" +
+	"\x05block\x18\x02 \x01(\bR\x05block\x12(\n" +
+	"\x10use_threat_intel\x18\x03 \x01(\bR\x0euseThreatIntel\x12'\n" +
+	"\x0fblocked_domains\x18\x04 \x03(\tR\x0eblockedDomains\x12'\n" +
+	"\x0fallowed_domains\x18\x05 \x03(\tR\x0eallowedDomains\"\xd0\x01\n" +
+	"\x19IntrusionPreventionPolicy\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x18\n" +
+	"\aprevent\x18\x02 \x01(\bR\aprevent\x12!\n" +
+	"\fmax_failures\x18\x03 \x01(\rR\vmaxFailures\x12%\n" +
+	"\x0ewindow_seconds\x18\x04 \x01(\rR\rwindowSeconds\x12\x1f\n" +
+	"\vban_minutes\x18\x05 \x01(\rR\n" +
+	"banMinutes\x12\x14\n" +
+	"\x05allow\x18\x06 \x03(\tR\x05allow\"y\n" +
+	"\x13DeviceControlPolicy\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x1f\n" +
+	"\vusb_storage\x18\x02 \x01(\tR\n" +
+	"usbStorage\x12'\n" +
+	"\x0fallowed_devices\x18\x03 \x03(\tR\x0eallowedDevices\"b\n" +
+	"\x18ActivityMonitoringPolicy\x12\x18\n" +
+	"\aprocess\x18\x01 \x01(\bR\aprocess\x12\x12\n" +
+	"\x04file\x18\x02 \x01(\bR\x04file\x12\x18\n" +
+	"\anetwork\x18\x03 \x01(\bR\anetwork\"\x96\x01\n" +
+	"\x18ApplicationControlPolicy\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x14\n" +
+	"\x05block\x18\x02 \x01(\bR\x05block\x12#\n" +
+	"\rblocked_paths\x18\x03 \x03(\tR\fblockedPaths\x12%\n" +
+	"\x0eblocked_sha256\x18\x04 \x03(\tR\rblockedSha256\"\x80\x01\n" +
 	"\tFimPolicy\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x14\n" +
 	"\x05paths\x18\x02 \x03(\tR\x05paths\x12\x18\n" +
@@ -3749,7 +4496,7 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"\bprotocol\x18\x03 \x01(\tR\bprotocol\x12\x14\n" +
 	"\x05ports\x18\x04 \x01(\tR\x05ports\x12\x12\n" +
 	"\x04cidr\x18\x05 \x01(\tR\x04cidr\x12\x18\n" +
-	"\acomment\x18\x06 \x01(\tR\acomment\"\xda\x01\n" +
+	"\acomment\x18\x06 \x01(\tR\acomment\"\xd1\x04\n" +
 	"\x0fPreventionState\x12#\n" +
 	"\rexec_blocking\x18\x01 \x01(\bR\fexecBlocking\x12%\n" +
 	"\x0eblocked_hashes\x18\x02 \x01(\rR\rblockedHashes\x12\x1d\n" +
@@ -3757,7 +4504,19 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"fim_active\x18\x03 \x01(\bR\tfimActive\x12\x1b\n" +
 	"\tfim_files\x18\x04 \x01(\rR\bfimFiles\x12)\n" +
 	"\x10firewall_applied\x18\x05 \x01(\bR\x0ffirewallApplied\x12\x14\n" +
-	"\x05error\x18\x06 \x01(\tR\x05error\"3\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error\x12\x1f\n" +
+	"\vpolicy_name\x18\a \x01(\tR\n" +
+	"policyName\x12#\n" +
+	"\rrealtime_scan\x18\b \x01(\bR\frealtimeScan\x120\n" +
+	"\x14web_reputation_addrs\x18\t \x01(\rR\x12webReputationAddrs\x126\n" +
+	"\x17web_reputation_blocking\x18\n" +
+	" \x01(\bR\x15webReputationBlocking\x121\n" +
+	"\x14intrusion_prevention\x18\v \x01(\bR\x13intrusionPrevention\x12!\n" +
+	"\fbanned_addrs\x18\f \x01(\rR\vbannedAddrs\x12%\n" +
+	"\x0edevice_control\x18\r \x01(\bR\rdeviceControl\x12'\n" +
+	"\x0fblocked_devices\x18\x0e \x01(\rR\x0eblockedDevices\x12\x1f\n" +
+	"\vapp_control\x18\x0f \x01(\bR\n" +
+	"appControl\"3\n" +
 	"\tPamPolicy\x12&\n" +
 	"\x0frecord_all_sudo\x18\x01 \x01(\bR\rrecordAllSudo\"b\n" +
 	"\fTamperPolicy\x12\x18\n" +
@@ -3776,12 +4535,15 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\"\x12\n" +
 	"\x10CommandResultAck\"\x19\n" +
-	"\x17DetectionContentRequest\"r\n" +
+	"\x17DetectionContentRequest\"\xac\x01\n" +
 	"\x10DetectionContent\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x1d\n" +
 	"\n" +
 	"yara_rules\x18\x02 \x01(\tR\tyaraRules\x12%\n" +
-	"\x0eblocked_sha256\x18\x03 \x01(\fR\rblockedSha256\"@\n" +
+	"\x0eblocked_sha256\x18\x03 \x01(\fR\rblockedSha256\x12\x17\n" +
+	"\abad_ips\x18\x04 \x03(\tR\x06badIps\x12\x1f\n" +
+	"\vbad_domains\x18\x05 \x03(\tR\n" +
+	"badDomains\"@\n" +
 	"\x12AgentBinaryRequest\x12\x12\n" +
 	"\x04arch\x18\x01 \x01(\tR\x04arch\x12\x16\n" +
 	"\x06offset\x18\x02 \x01(\x04R\x06offset\"_\n" +
@@ -3794,7 +4556,7 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"EventBatch\x12%\n" +
 	"\x06events\x18\x01 \x03(\v2\r.xdr.v1.EventR\x06events\"0\n" +
 	"\x12SendEventsResponse\x12\x1a\n" +
-	"\baccepted\x18\x01 \x01(\x04R\baccepted\"\xde\x02\n" +
+	"\baccepted\x18\x01 \x01(\x04R\baccepted\"\x8d\x03\n" +
 	"\x05Event\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12.\n" +
 	"\x13timestamp_unix_nano\x18\x02 \x01(\x03R\x11timestampUnixNano\x12%\n" +
@@ -3804,7 +4566,8 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"\x04file\x18\v \x01(\v2\x11.xdr.v1.FileEventH\x00R\x04file\x120\n" +
 	"\anetwork\x18\f \x01(\v2\x14.xdr.v1.NetworkEventH\x00R\anetwork\x12'\n" +
 	"\x04yara\x18\r \x01(\v2\x11.xdr.v1.YaraMatchH\x00R\x04yara\x12-\n" +
-	"\x06tamper\x18\x0e \x01(\v2\x13.xdr.v1.TamperEventH\x00R\x06tamperB\t\n" +
+	"\x06tamper\x18\x0e \x01(\v2\x13.xdr.v1.TamperEventH\x00R\x06tamper\x12-\n" +
+	"\x06policy\x18\x0f \x01(\v2\x13.xdr.v1.PolicyEventH\x00R\x06policyB\t\n" +
 	"\apayload\"\xf8\x01\n" +
 	"\fProcessEvent\x12\x10\n" +
 	"\x03pid\x18\x01 \x01(\rR\x03pid\x12\x12\n" +
@@ -3847,18 +4610,28 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"remotePort\x12\x10\n" +
 	"\x03pid\x18\x06 \x01(\rR\x03pid\x12\x10\n" +
 	"\x03exe\x18\a \x01(\tR\x03exe\x12\x10\n" +
-	"\x03uid\x18\b \x01(\rR\x03uid\"s\n" +
+	"\x03uid\x18\b \x01(\rR\x03uid\"\x8b\x01\n" +
 	"\tYaraMatch\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x16\n" +
 	"\x06sha256\x18\x02 \x01(\tR\x06sha256\x12\x14\n" +
 	"\x05rules\x18\x03 \x03(\tR\x05rules\x12\x10\n" +
 	"\x03pid\x18\x04 \x01(\rR\x03pid\x12\x12\n" +
-	"\x04size\x18\x05 \x01(\x04R\x04size\"a\n" +
+	"\x04size\x18\x05 \x01(\x04R\x04size\x12\x16\n" +
+	"\x06action\x18\x06 \x01(\tR\x06action\"a\n" +
 	"\vTamperEvent\x12\x16\n" +
 	"\x06action\x18\x01 \x01(\tR\x06action\x12\x16\n" +
 	"\x06detail\x18\x02 \x01(\tR\x06detail\x12\x10\n" +
 	"\x03pid\x18\x03 \x01(\rR\x03pid\x12\x10\n" +
-	"\x03exe\x18\x04 \x01(\tR\x03exe\"{\n" +
+	"\x03exe\x18\x04 \x01(\tR\x03exe\"\xae\x01\n" +
+	"\vPolicyEvent\x12\x16\n" +
+	"\x06action\x18\x01 \x01(\tR\x06action\x12\x16\n" +
+	"\x06detail\x18\x02 \x01(\tR\x06detail\x12\x1f\n" +
+	"\vremote_addr\x18\x03 \x01(\tR\n" +
+	"remoteAddr\x12\x10\n" +
+	"\x03pid\x18\x04 \x01(\rR\x03pid\x12\x10\n" +
+	"\x03exe\x18\x05 \x01(\tR\x03exe\x12\x16\n" +
+	"\x06sha256\x18\x06 \x01(\tR\x06sha256\x12\x12\n" +
+	"\x04user\x18\a \x01(\tR\x04user\"{\n" +
 	"\x10ElevationRequest\x12\x12\n" +
 	"\x04user\x18\x01 \x01(\tR\x04user\x12\x10\n" +
 	"\x03uid\x18\x02 \x01(\rR\x03uid\x12\x16\n" +
@@ -3994,7 +4767,7 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"\x1cCOMMAND_TYPE_GRANT_ELEVATION\x10\t\x12!\n" +
 	"\x1dCOMMAND_TYPE_REVOKE_ELEVATION\x10\n" +
 	"\x12\x1f\n" +
-	"\x1bCOMMAND_TYPE_FIM_REBASELINE\x10\v*\xaf\x03\n" +
+	"\x1bCOMMAND_TYPE_FIM_REBASELINE\x10\v*\xa3\x04\n" +
 	"\tEventType\x12\x1a\n" +
 	"\x16EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17EVENT_TYPE_PROCESS_EXEC\x10\x01\x12\x1b\n" +
@@ -4011,7 +4784,11 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"\x15EVENT_TYPE_NET_ACCEPT\x10\v\x12\x1b\n" +
 	"\x17EVENT_TYPE_AGENT_TAMPER\x10\f\x12\x1b\n" +
 	"\x17EVENT_TYPE_EXEC_BLOCKED\x10\r\x12\x19\n" +
-	"\x15EVENT_TYPE_FIM_CHANGE\x10\x0e2L\n" +
+	"\x15EVENT_TYPE_FIM_CHANGE\x10\x0e\x12\x1d\n" +
+	"\x19EVENT_TYPE_WEB_REPUTATION\x10\x0f\x12\x18\n" +
+	"\x14EVENT_TYPE_INTRUSION\x10\x10\x12\x1d\n" +
+	"\x19EVENT_TYPE_DEVICE_CONTROL\x10\x11\x12\x1a\n" +
+	"\x16EVENT_TYPE_APP_CONTROL\x10\x122L\n" +
 	"\x11EnrollmentService\x127\n" +
 	"\x06Enroll\x12\x15.xdr.v1.EnrollRequest\x1a\x16.xdr.v1.EnrollResponse2\xd3\x05\n" +
 	"\fAgentService\x12@\n" +
@@ -4040,119 +4817,133 @@ func file_xdr_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_xdr_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_xdr_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 48)
+var file_xdr_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 55)
 var file_xdr_v1_agent_proto_goTypes = []any{
-	(CommandType)(0),                // 0: xdr.v1.CommandType
-	(EventType)(0),                  // 1: xdr.v1.EventType
-	(*HostInfo)(nil),                // 2: xdr.v1.HostInfo
-	(*EnrollRequest)(nil),           // 3: xdr.v1.EnrollRequest
-	(*EnrollResponse)(nil),          // 4: xdr.v1.EnrollResponse
-	(*HeartbeatRequest)(nil),        // 5: xdr.v1.HeartbeatRequest
-	(*AgentStats)(nil),              // 6: xdr.v1.AgentStats
-	(*HeartbeatResponse)(nil),       // 7: xdr.v1.HeartbeatResponse
-	(*PreventionPolicy)(nil),        // 8: xdr.v1.PreventionPolicy
-	(*FimPolicy)(nil),               // 9: xdr.v1.FimPolicy
-	(*FirewallPolicy)(nil),          // 10: xdr.v1.FirewallPolicy
-	(*FirewallRule)(nil),            // 11: xdr.v1.FirewallRule
-	(*PreventionState)(nil),         // 12: xdr.v1.PreventionState
-	(*PamPolicy)(nil),               // 13: xdr.v1.PamPolicy
-	(*TamperPolicy)(nil),            // 14: xdr.v1.TamperPolicy
-	(*AgentCommand)(nil),            // 15: xdr.v1.AgentCommand
-	(*CommandResult)(nil),           // 16: xdr.v1.CommandResult
-	(*CommandResultAck)(nil),        // 17: xdr.v1.CommandResultAck
-	(*DetectionContentRequest)(nil), // 18: xdr.v1.DetectionContentRequest
-	(*DetectionContent)(nil),        // 19: xdr.v1.DetectionContent
-	(*AgentBinaryRequest)(nil),      // 20: xdr.v1.AgentBinaryRequest
-	(*AgentBinaryChunk)(nil),        // 21: xdr.v1.AgentBinaryChunk
-	(*EventBatch)(nil),              // 22: xdr.v1.EventBatch
-	(*SendEventsResponse)(nil),      // 23: xdr.v1.SendEventsResponse
-	(*Event)(nil),                   // 24: xdr.v1.Event
-	(*ProcessEvent)(nil),            // 25: xdr.v1.ProcessEvent
-	(*FileEvent)(nil),               // 26: xdr.v1.FileEvent
-	(*NetworkEvent)(nil),            // 27: xdr.v1.NetworkEvent
-	(*YaraMatch)(nil),               // 28: xdr.v1.YaraMatch
-	(*TamperEvent)(nil),             // 29: xdr.v1.TamperEvent
-	(*ElevationRequest)(nil),        // 30: xdr.v1.ElevationRequest
-	(*GetElevationRequest)(nil),     // 31: xdr.v1.GetElevationRequest
-	(*ElevationStatus)(nil),         // 32: xdr.v1.ElevationStatus
-	(*PrivilegedAccount)(nil),       // 33: xdr.v1.PrivilegedAccount
-	(*PrivilegedAccounts)(nil),      // 34: xdr.v1.PrivilegedAccounts
-	(*PrivilegedAccountsAck)(nil),   // 35: xdr.v1.PrivilegedAccountsAck
-	(*SessionRecording)(nil),        // 36: xdr.v1.SessionRecording
-	(*SessionRecordingAck)(nil),     // 37: xdr.v1.SessionRecordingAck
-	(*LiveDown)(nil),                // 38: xdr.v1.LiveDown
-	(*LiveUp)(nil),                  // 39: xdr.v1.LiveUp
-	(*ShellOpen)(nil),               // 40: xdr.v1.ShellOpen
-	(*ShellData)(nil),               // 41: xdr.v1.ShellData
-	(*ShellResize)(nil),             // 42: xdr.v1.ShellResize
-	(*ShellClose)(nil),              // 43: xdr.v1.ShellClose
-	(*ShellExit)(nil),               // 44: xdr.v1.ShellExit
-	(*ActivityRequest)(nil),         // 45: xdr.v1.ActivityRequest
-	(*Activity)(nil),                // 46: xdr.v1.Activity
-	(*TerminalSession)(nil),         // 47: xdr.v1.TerminalSession
-	(*LiveProcess)(nil),             // 48: xdr.v1.LiveProcess
-	nil,                             // 49: xdr.v1.AgentCommand.ArgsEntry
+	(CommandType)(0),                  // 0: xdr.v1.CommandType
+	(EventType)(0),                    // 1: xdr.v1.EventType
+	(*HostInfo)(nil),                  // 2: xdr.v1.HostInfo
+	(*EnrollRequest)(nil),             // 3: xdr.v1.EnrollRequest
+	(*EnrollResponse)(nil),            // 4: xdr.v1.EnrollResponse
+	(*HeartbeatRequest)(nil),          // 5: xdr.v1.HeartbeatRequest
+	(*AgentStats)(nil),                // 6: xdr.v1.AgentStats
+	(*HeartbeatResponse)(nil),         // 7: xdr.v1.HeartbeatResponse
+	(*PreventionPolicy)(nil),          // 8: xdr.v1.PreventionPolicy
+	(*AntiMalwarePolicy)(nil),         // 9: xdr.v1.AntiMalwarePolicy
+	(*WebReputationPolicy)(nil),       // 10: xdr.v1.WebReputationPolicy
+	(*IntrusionPreventionPolicy)(nil), // 11: xdr.v1.IntrusionPreventionPolicy
+	(*DeviceControlPolicy)(nil),       // 12: xdr.v1.DeviceControlPolicy
+	(*ActivityMonitoringPolicy)(nil),  // 13: xdr.v1.ActivityMonitoringPolicy
+	(*ApplicationControlPolicy)(nil),  // 14: xdr.v1.ApplicationControlPolicy
+	(*FimPolicy)(nil),                 // 15: xdr.v1.FimPolicy
+	(*FirewallPolicy)(nil),            // 16: xdr.v1.FirewallPolicy
+	(*FirewallRule)(nil),              // 17: xdr.v1.FirewallRule
+	(*PreventionState)(nil),           // 18: xdr.v1.PreventionState
+	(*PamPolicy)(nil),                 // 19: xdr.v1.PamPolicy
+	(*TamperPolicy)(nil),              // 20: xdr.v1.TamperPolicy
+	(*AgentCommand)(nil),              // 21: xdr.v1.AgentCommand
+	(*CommandResult)(nil),             // 22: xdr.v1.CommandResult
+	(*CommandResultAck)(nil),          // 23: xdr.v1.CommandResultAck
+	(*DetectionContentRequest)(nil),   // 24: xdr.v1.DetectionContentRequest
+	(*DetectionContent)(nil),          // 25: xdr.v1.DetectionContent
+	(*AgentBinaryRequest)(nil),        // 26: xdr.v1.AgentBinaryRequest
+	(*AgentBinaryChunk)(nil),          // 27: xdr.v1.AgentBinaryChunk
+	(*EventBatch)(nil),                // 28: xdr.v1.EventBatch
+	(*SendEventsResponse)(nil),        // 29: xdr.v1.SendEventsResponse
+	(*Event)(nil),                     // 30: xdr.v1.Event
+	(*ProcessEvent)(nil),              // 31: xdr.v1.ProcessEvent
+	(*FileEvent)(nil),                 // 32: xdr.v1.FileEvent
+	(*NetworkEvent)(nil),              // 33: xdr.v1.NetworkEvent
+	(*YaraMatch)(nil),                 // 34: xdr.v1.YaraMatch
+	(*TamperEvent)(nil),               // 35: xdr.v1.TamperEvent
+	(*PolicyEvent)(nil),               // 36: xdr.v1.PolicyEvent
+	(*ElevationRequest)(nil),          // 37: xdr.v1.ElevationRequest
+	(*GetElevationRequest)(nil),       // 38: xdr.v1.GetElevationRequest
+	(*ElevationStatus)(nil),           // 39: xdr.v1.ElevationStatus
+	(*PrivilegedAccount)(nil),         // 40: xdr.v1.PrivilegedAccount
+	(*PrivilegedAccounts)(nil),        // 41: xdr.v1.PrivilegedAccounts
+	(*PrivilegedAccountsAck)(nil),     // 42: xdr.v1.PrivilegedAccountsAck
+	(*SessionRecording)(nil),          // 43: xdr.v1.SessionRecording
+	(*SessionRecordingAck)(nil),       // 44: xdr.v1.SessionRecordingAck
+	(*LiveDown)(nil),                  // 45: xdr.v1.LiveDown
+	(*LiveUp)(nil),                    // 46: xdr.v1.LiveUp
+	(*ShellOpen)(nil),                 // 47: xdr.v1.ShellOpen
+	(*ShellData)(nil),                 // 48: xdr.v1.ShellData
+	(*ShellResize)(nil),               // 49: xdr.v1.ShellResize
+	(*ShellClose)(nil),                // 50: xdr.v1.ShellClose
+	(*ShellExit)(nil),                 // 51: xdr.v1.ShellExit
+	(*ActivityRequest)(nil),           // 52: xdr.v1.ActivityRequest
+	(*Activity)(nil),                  // 53: xdr.v1.Activity
+	(*TerminalSession)(nil),           // 54: xdr.v1.TerminalSession
+	(*LiveProcess)(nil),               // 55: xdr.v1.LiveProcess
+	nil,                               // 56: xdr.v1.AgentCommand.ArgsEntry
 }
 var file_xdr_v1_agent_proto_depIdxs = []int32{
 	2,  // 0: xdr.v1.EnrollRequest.host:type_name -> xdr.v1.HostInfo
 	2,  // 1: xdr.v1.HeartbeatRequest.host:type_name -> xdr.v1.HostInfo
 	6,  // 2: xdr.v1.HeartbeatRequest.stats:type_name -> xdr.v1.AgentStats
-	12, // 3: xdr.v1.HeartbeatRequest.prevention:type_name -> xdr.v1.PreventionState
-	15, // 4: xdr.v1.HeartbeatResponse.commands:type_name -> xdr.v1.AgentCommand
-	14, // 5: xdr.v1.HeartbeatResponse.tamper:type_name -> xdr.v1.TamperPolicy
-	13, // 6: xdr.v1.HeartbeatResponse.pam:type_name -> xdr.v1.PamPolicy
+	18, // 3: xdr.v1.HeartbeatRequest.prevention:type_name -> xdr.v1.PreventionState
+	21, // 4: xdr.v1.HeartbeatResponse.commands:type_name -> xdr.v1.AgentCommand
+	20, // 5: xdr.v1.HeartbeatResponse.tamper:type_name -> xdr.v1.TamperPolicy
+	19, // 6: xdr.v1.HeartbeatResponse.pam:type_name -> xdr.v1.PamPolicy
 	8,  // 7: xdr.v1.HeartbeatResponse.prevention:type_name -> xdr.v1.PreventionPolicy
-	9,  // 8: xdr.v1.PreventionPolicy.fim:type_name -> xdr.v1.FimPolicy
-	10, // 9: xdr.v1.PreventionPolicy.firewall:type_name -> xdr.v1.FirewallPolicy
-	11, // 10: xdr.v1.FirewallPolicy.rules:type_name -> xdr.v1.FirewallRule
-	0,  // 11: xdr.v1.AgentCommand.type:type_name -> xdr.v1.CommandType
-	49, // 12: xdr.v1.AgentCommand.args:type_name -> xdr.v1.AgentCommand.ArgsEntry
-	24, // 13: xdr.v1.EventBatch.events:type_name -> xdr.v1.Event
-	1,  // 14: xdr.v1.Event.type:type_name -> xdr.v1.EventType
-	25, // 15: xdr.v1.Event.process:type_name -> xdr.v1.ProcessEvent
-	26, // 16: xdr.v1.Event.file:type_name -> xdr.v1.FileEvent
-	27, // 17: xdr.v1.Event.network:type_name -> xdr.v1.NetworkEvent
-	28, // 18: xdr.v1.Event.yara:type_name -> xdr.v1.YaraMatch
-	29, // 19: xdr.v1.Event.tamper:type_name -> xdr.v1.TamperEvent
-	33, // 20: xdr.v1.PrivilegedAccounts.accounts:type_name -> xdr.v1.PrivilegedAccount
-	40, // 21: xdr.v1.LiveDown.shell_open:type_name -> xdr.v1.ShellOpen
-	41, // 22: xdr.v1.LiveDown.shell_input:type_name -> xdr.v1.ShellData
-	42, // 23: xdr.v1.LiveDown.shell_resize:type_name -> xdr.v1.ShellResize
-	43, // 24: xdr.v1.LiveDown.shell_close:type_name -> xdr.v1.ShellClose
-	45, // 25: xdr.v1.LiveDown.activity:type_name -> xdr.v1.ActivityRequest
-	41, // 26: xdr.v1.LiveUp.shell_output:type_name -> xdr.v1.ShellData
-	44, // 27: xdr.v1.LiveUp.shell_exit:type_name -> xdr.v1.ShellExit
-	46, // 28: xdr.v1.LiveUp.activity:type_name -> xdr.v1.Activity
-	47, // 29: xdr.v1.Activity.terminals:type_name -> xdr.v1.TerminalSession
-	48, // 30: xdr.v1.Activity.top:type_name -> xdr.v1.LiveProcess
-	48, // 31: xdr.v1.TerminalSession.processes:type_name -> xdr.v1.LiveProcess
-	3,  // 32: xdr.v1.EnrollmentService.Enroll:input_type -> xdr.v1.EnrollRequest
-	5,  // 33: xdr.v1.AgentService.Heartbeat:input_type -> xdr.v1.HeartbeatRequest
-	22, // 34: xdr.v1.AgentService.SendEvents:input_type -> xdr.v1.EventBatch
-	18, // 35: xdr.v1.AgentService.GetDetectionContent:input_type -> xdr.v1.DetectionContentRequest
-	16, // 36: xdr.v1.AgentService.ReportCommandResult:input_type -> xdr.v1.CommandResult
-	20, // 37: xdr.v1.AgentService.GetAgentBinary:input_type -> xdr.v1.AgentBinaryRequest
-	30, // 38: xdr.v1.AgentService.RequestElevation:input_type -> xdr.v1.ElevationRequest
-	31, // 39: xdr.v1.AgentService.GetElevation:input_type -> xdr.v1.GetElevationRequest
-	34, // 40: xdr.v1.AgentService.ReportPrivilegedAccounts:input_type -> xdr.v1.PrivilegedAccounts
-	36, // 41: xdr.v1.AgentService.UploadSessionRecording:input_type -> xdr.v1.SessionRecording
-	39, // 42: xdr.v1.AgentService.Live:input_type -> xdr.v1.LiveUp
-	4,  // 43: xdr.v1.EnrollmentService.Enroll:output_type -> xdr.v1.EnrollResponse
-	7,  // 44: xdr.v1.AgentService.Heartbeat:output_type -> xdr.v1.HeartbeatResponse
-	23, // 45: xdr.v1.AgentService.SendEvents:output_type -> xdr.v1.SendEventsResponse
-	19, // 46: xdr.v1.AgentService.GetDetectionContent:output_type -> xdr.v1.DetectionContent
-	17, // 47: xdr.v1.AgentService.ReportCommandResult:output_type -> xdr.v1.CommandResultAck
-	21, // 48: xdr.v1.AgentService.GetAgentBinary:output_type -> xdr.v1.AgentBinaryChunk
-	32, // 49: xdr.v1.AgentService.RequestElevation:output_type -> xdr.v1.ElevationStatus
-	32, // 50: xdr.v1.AgentService.GetElevation:output_type -> xdr.v1.ElevationStatus
-	35, // 51: xdr.v1.AgentService.ReportPrivilegedAccounts:output_type -> xdr.v1.PrivilegedAccountsAck
-	37, // 52: xdr.v1.AgentService.UploadSessionRecording:output_type -> xdr.v1.SessionRecordingAck
-	38, // 53: xdr.v1.AgentService.Live:output_type -> xdr.v1.LiveDown
-	43, // [43:54] is the sub-list for method output_type
-	32, // [32:43] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	15, // 8: xdr.v1.PreventionPolicy.fim:type_name -> xdr.v1.FimPolicy
+	16, // 9: xdr.v1.PreventionPolicy.firewall:type_name -> xdr.v1.FirewallPolicy
+	9,  // 10: xdr.v1.PreventionPolicy.anti_malware:type_name -> xdr.v1.AntiMalwarePolicy
+	10, // 11: xdr.v1.PreventionPolicy.web_reputation:type_name -> xdr.v1.WebReputationPolicy
+	11, // 12: xdr.v1.PreventionPolicy.intrusion_prevention:type_name -> xdr.v1.IntrusionPreventionPolicy
+	12, // 13: xdr.v1.PreventionPolicy.device_control:type_name -> xdr.v1.DeviceControlPolicy
+	13, // 14: xdr.v1.PreventionPolicy.activity_monitoring:type_name -> xdr.v1.ActivityMonitoringPolicy
+	14, // 15: xdr.v1.PreventionPolicy.application_control:type_name -> xdr.v1.ApplicationControlPolicy
+	17, // 16: xdr.v1.FirewallPolicy.rules:type_name -> xdr.v1.FirewallRule
+	0,  // 17: xdr.v1.AgentCommand.type:type_name -> xdr.v1.CommandType
+	56, // 18: xdr.v1.AgentCommand.args:type_name -> xdr.v1.AgentCommand.ArgsEntry
+	30, // 19: xdr.v1.EventBatch.events:type_name -> xdr.v1.Event
+	1,  // 20: xdr.v1.Event.type:type_name -> xdr.v1.EventType
+	31, // 21: xdr.v1.Event.process:type_name -> xdr.v1.ProcessEvent
+	32, // 22: xdr.v1.Event.file:type_name -> xdr.v1.FileEvent
+	33, // 23: xdr.v1.Event.network:type_name -> xdr.v1.NetworkEvent
+	34, // 24: xdr.v1.Event.yara:type_name -> xdr.v1.YaraMatch
+	35, // 25: xdr.v1.Event.tamper:type_name -> xdr.v1.TamperEvent
+	36, // 26: xdr.v1.Event.policy:type_name -> xdr.v1.PolicyEvent
+	40, // 27: xdr.v1.PrivilegedAccounts.accounts:type_name -> xdr.v1.PrivilegedAccount
+	47, // 28: xdr.v1.LiveDown.shell_open:type_name -> xdr.v1.ShellOpen
+	48, // 29: xdr.v1.LiveDown.shell_input:type_name -> xdr.v1.ShellData
+	49, // 30: xdr.v1.LiveDown.shell_resize:type_name -> xdr.v1.ShellResize
+	50, // 31: xdr.v1.LiveDown.shell_close:type_name -> xdr.v1.ShellClose
+	52, // 32: xdr.v1.LiveDown.activity:type_name -> xdr.v1.ActivityRequest
+	48, // 33: xdr.v1.LiveUp.shell_output:type_name -> xdr.v1.ShellData
+	51, // 34: xdr.v1.LiveUp.shell_exit:type_name -> xdr.v1.ShellExit
+	53, // 35: xdr.v1.LiveUp.activity:type_name -> xdr.v1.Activity
+	54, // 36: xdr.v1.Activity.terminals:type_name -> xdr.v1.TerminalSession
+	55, // 37: xdr.v1.Activity.top:type_name -> xdr.v1.LiveProcess
+	55, // 38: xdr.v1.TerminalSession.processes:type_name -> xdr.v1.LiveProcess
+	3,  // 39: xdr.v1.EnrollmentService.Enroll:input_type -> xdr.v1.EnrollRequest
+	5,  // 40: xdr.v1.AgentService.Heartbeat:input_type -> xdr.v1.HeartbeatRequest
+	28, // 41: xdr.v1.AgentService.SendEvents:input_type -> xdr.v1.EventBatch
+	24, // 42: xdr.v1.AgentService.GetDetectionContent:input_type -> xdr.v1.DetectionContentRequest
+	22, // 43: xdr.v1.AgentService.ReportCommandResult:input_type -> xdr.v1.CommandResult
+	26, // 44: xdr.v1.AgentService.GetAgentBinary:input_type -> xdr.v1.AgentBinaryRequest
+	37, // 45: xdr.v1.AgentService.RequestElevation:input_type -> xdr.v1.ElevationRequest
+	38, // 46: xdr.v1.AgentService.GetElevation:input_type -> xdr.v1.GetElevationRequest
+	41, // 47: xdr.v1.AgentService.ReportPrivilegedAccounts:input_type -> xdr.v1.PrivilegedAccounts
+	43, // 48: xdr.v1.AgentService.UploadSessionRecording:input_type -> xdr.v1.SessionRecording
+	46, // 49: xdr.v1.AgentService.Live:input_type -> xdr.v1.LiveUp
+	4,  // 50: xdr.v1.EnrollmentService.Enroll:output_type -> xdr.v1.EnrollResponse
+	7,  // 51: xdr.v1.AgentService.Heartbeat:output_type -> xdr.v1.HeartbeatResponse
+	29, // 52: xdr.v1.AgentService.SendEvents:output_type -> xdr.v1.SendEventsResponse
+	25, // 53: xdr.v1.AgentService.GetDetectionContent:output_type -> xdr.v1.DetectionContent
+	23, // 54: xdr.v1.AgentService.ReportCommandResult:output_type -> xdr.v1.CommandResultAck
+	27, // 55: xdr.v1.AgentService.GetAgentBinary:output_type -> xdr.v1.AgentBinaryChunk
+	39, // 56: xdr.v1.AgentService.RequestElevation:output_type -> xdr.v1.ElevationStatus
+	39, // 57: xdr.v1.AgentService.GetElevation:output_type -> xdr.v1.ElevationStatus
+	42, // 58: xdr.v1.AgentService.ReportPrivilegedAccounts:output_type -> xdr.v1.PrivilegedAccountsAck
+	44, // 59: xdr.v1.AgentService.UploadSessionRecording:output_type -> xdr.v1.SessionRecordingAck
+	45, // 60: xdr.v1.AgentService.Live:output_type -> xdr.v1.LiveDown
+	50, // [50:61] is the sub-list for method output_type
+	39, // [39:50] is the sub-list for method input_type
+	39, // [39:39] is the sub-list for extension type_name
+	39, // [39:39] is the sub-list for extension extendee
+	0,  // [0:39] is the sub-list for field type_name
 }
 
 func init() { file_xdr_v1_agent_proto_init() }
@@ -4160,21 +4951,22 @@ func file_xdr_v1_agent_proto_init() {
 	if File_xdr_v1_agent_proto != nil {
 		return
 	}
-	file_xdr_v1_agent_proto_msgTypes[22].OneofWrappers = []any{
+	file_xdr_v1_agent_proto_msgTypes[28].OneofWrappers = []any{
 		(*Event_Process)(nil),
 		(*Event_File)(nil),
 		(*Event_Network)(nil),
 		(*Event_Yara)(nil),
 		(*Event_Tamper)(nil),
+		(*Event_Policy)(nil),
 	}
-	file_xdr_v1_agent_proto_msgTypes[36].OneofWrappers = []any{
+	file_xdr_v1_agent_proto_msgTypes[43].OneofWrappers = []any{
 		(*LiveDown_ShellOpen)(nil),
 		(*LiveDown_ShellInput)(nil),
 		(*LiveDown_ShellResize)(nil),
 		(*LiveDown_ShellClose)(nil),
 		(*LiveDown_Activity)(nil),
 	}
-	file_xdr_v1_agent_proto_msgTypes[37].OneofWrappers = []any{
+	file_xdr_v1_agent_proto_msgTypes[44].OneofWrappers = []any{
 		(*LiveUp_ShellOutput)(nil),
 		(*LiveUp_ShellExit)(nil),
 		(*LiveUp_Activity)(nil),
@@ -4185,7 +4977,7 @@ func file_xdr_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_xdr_v1_agent_proto_rawDesc), len(file_xdr_v1_agent_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   48,
+			NumMessages:   55,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

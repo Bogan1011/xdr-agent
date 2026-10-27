@@ -208,3 +208,48 @@ func TestExecBlocking(t *testing.T) {
 		t.Fatalf("events = %v", evs)
 	}
 }
+
+// TestAppControlBlocking blocks by path with a real fanotify blocker.
+func TestAppControlBlocking(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root")
+	}
+	raw, err := os.ReadFile("/bin/true")
+	if err != nil {
+		t.Skip("no /bin/true")
+	}
+	dir := t.TempDir()
+	blocked, other := filepath.Join(dir, "game-x"), filepath.Join(dir, "tool")
+	os.WriteFile(blocked, raw, 0o755)
+	os.WriteFile(other, raw, 0o755)
+
+	s := &sink{}
+	b := NewExecBlocker(slog.Default(), s.emit, 64<<20)
+	b.SetRules(false, &xdrv1.ApplicationControlPolicy{Enabled: true, Block: true, BlockedPaths: []string{dir + "/game-*"}})
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	go func() { done <- b.Run(ctx, func() { close(started) }) }()
+	select {
+	case err := <-done:
+		t.Skipf("fanotify unavailable: %v", err)
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("blocker did not start")
+	}
+	defer func() {
+		cancel()
+		<-done
+	}()
+	if err := exec.Command(other).Run(); err != nil {
+		t.Fatalf("allowed binary failed: %v", err)
+	}
+	if err := exec.Command(blocked).Run(); err == nil {
+		t.Fatal("blocked binary ran")
+	}
+	time.Sleep(100 * time.Millisecond)
+	evs := s.take()
+	if len(evs) != 1 || evs[0].Type != xdrv1.EventType_EVENT_TYPE_APP_CONTROL || evs[0].GetPolicy().Exe != blocked {
+		t.Fatalf("events = %v", evs)
+	}
+}

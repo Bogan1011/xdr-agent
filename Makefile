@@ -1,4 +1,4 @@
-VERSION ?= 0.5.0
+VERSION ?= 0.6.0
 LDFLAGS := -s -w -X github.com/Bogan1011/xdr-agent/internal/agent.Version=$(VERSION)
 
 .PHONY: all agent server web proto bpf test up down

@@ -160,31 +160,57 @@ Then revoke or delete the endpoint in the console.
   NOPASSWD, SSH key count and last login. An account that gains a new path
   to root raises a **New privileged account** alert.
 
-## Prevention
+## Policies
 
-Set fleet-wide under **Prevention**, or per endpoint with **Customize for
-this endpoint** on its page. Endpoints apply changes at their next check-in
-and keep the last policy across reboots.
+Protection is set with **policies** (Endpoints → Policies), Deep Security
+style. Each endpoint follows one policy; endpoints without one follow the
+**Default** policy. A policy has eight modules, each switched on or off on
+its own: pick a module in the policy's left-hand list, change it, then
+**Save policy**. Assign endpoints from the policy's Overview tab or from the
+policy menu on an endpoint's page. Endpoints apply changes at their next
+check-in (within 15 seconds) and keep the last policy across reboots.
 
-* **Exec blocking.** With *Block execution of hash IOCs* on, the agent
-  denies running any file whose SHA-256 is a hash IOC (manual or from a
-  feed, up to 500,000) using fanotify permission events (Linux 5.0+). The
-  process never starts and an **Execution blocked** alert is raised. Scripts
-  started through an interpreter (`bash evil.sh`) are not execs of the
-  script and are not blocked; `./evil.sh` is.
-* **File integrity monitoring.** The agent records a baseline (SHA-256,
-  mode, owner) of the monitored paths, then reports files added, removed or
-  changed: within seconds when the file collectors see the change, and on a
-  full rescan every interval. Each change is reported once and stays
-  visible until someone clicks **Accept changes as FIM baseline** (e.g.
-  after patching). Alerts: critical system files and system binaries are
-  high, everything else medium.
-* **Host firewall.** Inbound and outbound allow/deny rules by protocol,
-  port and remote CIDR, applied atomically as the nftables table
-  `inet xdr_firewall`, optionally denying unsolicited inbound traffic by
-  default. Loopback, established connections, DHCP and the console are
-  always allowed. If someone deletes the table the agent restores it and
-  raises a tamper alert.
+* **Anti-malware.** Real-time YARA scanning of new and changed files and
+  every program that starts; blocking of files whose SHA-256 is a hash IOC
+  (manual or feed, up to 500,000) with fanotify permission events
+  (Linux 5.0+), raising **Execution blocked**; optional auto-quarantine of
+  YARA matches (restore from the endpoint's Response panel). Scripts run
+  through an interpreter (`bash evil.sh`) are not execs of the script and
+  are not blocked; `./evil.sh` is.
+* **Web reputation.** Outbound connections to IP IOCs and to the addresses
+  of domain IOCs and the policy's own blocked domains (subdomains included)
+  are rejected with the nftables table `inet xdr_webrep` (output and
+  forward, so containers too), or only reported. The agent resolves domains
+  every 10 minutes (up to 2,000, the policy's own first). The console is
+  never blocked. Alert: **Connection to a known-bad address**.
+* **File integrity.** The agent records a baseline (SHA-256, mode, owner)
+  of the monitored paths, then reports files added, removed or changed:
+  within seconds when the file collectors see the change, and on a full
+  rescan every interval. Each change is reported once and stays visible
+  until someone clicks **Accept changes as FIM baseline**. Critical system
+  files and system binaries alert high, everything else medium.
+* **Firewall.** Inbound and outbound allow/deny rules by protocol, port and
+  remote CIDR, applied atomically as `inet xdr_firewall`, optionally denying
+  unsolicited inbound traffic by default. Loopback, established
+  connections, DHCP and the console are always allowed. If someone deletes
+  the table the agent restores it and raises a tamper alert.
+* **Intrusion prevention.** SSH brute-force protection: the agent follows
+  sshd's log (journald, or `/var/log/auth.log` / `/var/log/secure`) and
+  when one address fails N logins within the window it bans it for M
+  minutes (`inet xdr_ips`, nftables set timeouts) or only reports it.
+  Addresses on the never-ban list, loopback and the console are exempt.
+  Alert: **SSH brute force**.
+* **Device control.** USB mass storage can be allowed (each device is
+  reported) or blocked: the agent deauthorizes the device in sysfs as soon
+  as the kernel announces it, before a disk appears. Devices listed by
+  `vendor:product` ID (see `lsusb`) are always allowed. Other USB devices
+  are never touched. Alert: **USB storage device blocked**.
+* **Activity monitoring.** Which telemetry is sent: process, file, network.
+  Turning one off saves bandwidth and storage but stops the behaviour rules
+  that need it. Alerts and prevention events are always sent.
+* **Application control.** Programs listed by path (prefix or glob, e.g.
+  `/tmp/*`) or SHA-256 are blocked with fanotify, or only reported. Alert:
+  **Application control rule matched**.
 
 See [docs/comparison.md](docs/comparison.md) for how this product compares
 with Trend Micro Vision One and CrowdStrike Falcon, and the gaps that set
@@ -240,8 +266,12 @@ with `cd web && npm run dev` (it proxies `/api` to `:8080`).
 4. **PAM** (done): just-in-time sudo elevation with approval,
    session recording, privileged account inventory, and the
    [comparison](docs/comparison.md) with Vision One and CrowdStrike Falcon.
-5. **Prevention** (this release): exec blocking of hash IOCs, file
-   integrity monitoring with baselines, host firewall policy.
-6. The remaining Linux gaps in the comparison (investigation, console
+5. **Prevention** (done): exec blocking of hash IOCs, file integrity
+   monitoring with baselines, host firewall policy.
+6. **Policies** (this release, 0.6.0): named policies assigned to endpoints
+   with eight modules: anti-malware, web reputation, file integrity,
+   firewall, intrusion prevention, device control, activity monitoring and
+   application control.
+7. The remaining Linux gaps in the comparison (investigation, console
    hardening, vulnerability and posture, live response), then the Windows
    agent.

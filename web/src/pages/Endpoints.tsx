@@ -87,6 +87,7 @@ export default function Endpoints() {
                   <th>IP addresses</th>
                   <th>Agent</th>
                   <th>Protection</th>
+                  <th>Policy</th>
                   <th>Last seen</th>
                 </tr>
               </thead>
@@ -103,6 +104,7 @@ export default function Endpoints() {
                     <td className="mono">{a.ip_addresses.join(", ")}</td>
                     <td><VersionCell agent={a} fleet={fleet.data} /></td>
                     <td><ProtectionBadge agent={a} /></td>
+                    <td><Link to={`/policies/${a.policy_id || ""}`}>{a.policy_name}</Link></td>
                     <td>{timeAgo(a.last_seen)}</td>
                   </tr>
                 ))}

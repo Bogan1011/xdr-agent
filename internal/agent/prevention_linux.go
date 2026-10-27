@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -17,15 +18,25 @@ import (
 
 const firewallCheckInterval = 2 * time.Minute
 
-// Prevention enforces the console's prevention policy: exec blocking of
-// known-bad hashes, file integrity monitoring and the host firewall. The last
-// policy is kept on disk so it applies at boot before the console answers.
+// Prevention enforces the endpoint's policy, module by module: anti-malware
+// (real-time YARA scanning, exec blocking of hash IOCs, auto-quarantine), web
+// reputation, file integrity, the host firewall, intrusion prevention, device
+// control, activity monitoring and application control. The last policy is
+// kept on disk so it applies at boot before the console answers.
 type Prevention struct {
 	a    *Agent
 	log  *slog.Logger
 	file string
 	exec *ExecBlocker
 	fim  *FIM
+	web  *WebReputation
+	ips  *Intrusion
+	dev  *DeviceControl
+
+	// Read on every event, so kept outside mu.
+	realtime, quarantine        atomic.Bool
+	sendProc, sendFile, sendNet atomic.Bool
+	appMonitor                  atomic.Pointer[xdrv1.ApplicationControlPolicy]
 
 	mu         sync.Mutex
 	policy     *xdrv1.PreventionPolicy
@@ -42,17 +53,58 @@ func newPrevention(a *Agent, log *slog.Logger) *Prevention {
 		a: a, log: log, file: a.cfg.path("prevention.json"),
 		exec:       NewExecBlocker(log.With("component", "exec-block"), a.send, a.cfg.ScanMaxBytes),
 		fim:        NewFIM(log.With("component", "fim"), a.send, a.cfg.path("fim.json")),
+		web:        NewWebReputation(log.With("component", "web-reputation"), a.send, a.consoleAddrs),
+		ips:        NewIntrusion(log.With("component", "intrusion"), a.send, a.consoleAddrs),
+		dev:        NewDeviceControl(log.With("component", "device-control"), a.send, a.cfg.path("devctl.json")),
 		reconcileC: make(chan struct{}, 1),
 	}
-	if raw, err := os.ReadFile(p.file); err == nil {
-		pol := &xdrv1.PreventionPolicy{}
-		if protojson.Unmarshal(raw, pol) == nil {
-			p.policy = pol
-			p.fim.SetPolicy(pol.Fim)
-		}
+	pol := &xdrv1.PreventionPolicy{}
+	if raw, err := os.ReadFile(p.file); err == nil && protojson.Unmarshal(raw, pol) == nil {
+		p.policy = pol
+		p.fim.SetPolicy(pol.Fim)
 	}
+	p.setFlags(policy.Normalize(proto.Clone(pol).(*xdrv1.PreventionPolicy)))
 	return p
 }
+
+// setFlags publishes the settings that are read per event.
+func (p *Prevention) setFlags(pol *xdrv1.PreventionPolicy) {
+	am, act, ac := pol.AntiMalware, pol.ActivityMonitoring, pol.ApplicationControl
+	p.realtime.Store(am.Enabled)
+	p.quarantine.Store(am.Enabled && am.AutoQuarantine)
+	p.sendProc.Store(act.Process)
+	p.sendFile.Store(act.File)
+	p.sendNet.Store(act.Network)
+	if ac.Enabled {
+		p.appMonitor.Store(ac)
+	} else {
+		p.appMonitor.Store(nil)
+	}
+}
+
+// RealtimeScan reports whether new files and processes are YARA scanned.
+func (p *Prevention) RealtimeScan() bool { return p.realtime.Load() }
+
+// AutoQuarantine reports whether YARA matches are quarantined.
+func (p *Prevention) AutoQuarantine() bool { return p.quarantine.Load() }
+
+// Telemetry reports whether activity monitoring sends this event type.
+// Prevention and detection events are always sent.
+func (p *Prevention) Telemetry(t xdrv1.EventType) bool {
+	switch t {
+	case xdrv1.EventType_EVENT_TYPE_PROCESS_EXEC, xdrv1.EventType_EVENT_TYPE_PROCESS_EXIT:
+		return p.sendProc.Load()
+	case xdrv1.EventType_EVENT_TYPE_FILE_CREATE, xdrv1.EventType_EVENT_TYPE_FILE_MODIFY, xdrv1.EventType_EVENT_TYPE_FILE_DELETE,
+		xdrv1.EventType_EVENT_TYPE_FILE_RENAME, xdrv1.EventType_EVENT_TYPE_FILE_ATTRIB:
+		return p.sendFile.Load()
+	case xdrv1.EventType_EVENT_TYPE_NET_CONNECT, xdrv1.EventType_EVENT_TYPE_NET_LISTEN, xdrv1.EventType_EVENT_TYPE_NET_ACCEPT:
+		return p.sendNet.Load()
+	}
+	return true
+}
+
+// SetIntel takes the IP and domain IOCs for web reputation.
+func (p *Prevention) SetIntel(ips, domains []string) { p.web.SetIntel(ips, domains) }
 
 // SetPolicy takes the policy from a heartbeat.
 func (p *Prevention) SetPolicy(pol *xdrv1.PreventionPolicy) {
@@ -69,8 +121,9 @@ func (p *Prevention) SetPolicy(pol *xdrv1.PreventionPolicy) {
 	if raw, err := protojson.Marshal(pol); err == nil {
 		_ = os.WriteFile(p.file, raw, 0o600)
 	}
-	p.log.Info("prevention policy changed", "block_exec", pol.BlockExec, "fim", pol.GetFim().GetEnabled(),
-		"firewall", pol.GetFirewall().GetEnabled())
+	n := policy.Normalize(proto.Clone(pol).(*xdrv1.PreventionPolicy))
+	p.log.Info("policy changed", "policy", pol.Name, "modules", modulesOn(n))
+	p.setFlags(n)
 	p.fim.SetPolicy(pol.Fim)
 	p.reconcile()
 }
@@ -82,13 +135,58 @@ func (p *Prevention) SetBlocklist(raw []byte) {
 	p.reconcile()
 }
 
-// Observe feeds file events to FIM.
+// modulesOn names the modules a policy switches on, for the log.
+func modulesOn(p *xdrv1.PreventionPolicy) []string {
+	var out []string
+	for _, m := range []struct {
+		name string
+		on   bool
+	}{
+		{"anti-malware", p.AntiMalware.Enabled || p.AntiMalware.BlockKnownBad}, {"web-reputation", p.WebReputation.Enabled},
+		{"file-integrity", p.Fim.Enabled}, {"firewall", p.Firewall.Enabled},
+		{"intrusion-prevention", p.IntrusionPrevention.Enabled}, {"device-control", p.DeviceControl.Enabled},
+		{"application-control", p.ApplicationControl.Enabled},
+	} {
+		if m.on {
+			out = append(out, m.name)
+		}
+	}
+	return out
+}
+
+// Observe feeds file events to FIM, connections to web reputation and new
+// processes to application control.
 func (p *Prevention) Observe(e *xdrv1.Event) {
 	if fe := e.GetFile(); fe != nil {
 		p.fim.Notify(fe.Path)
 		if fe.OldPath != "" {
 			p.fim.Notify(fe.OldPath)
 		}
+	}
+	if e.GetNetwork() != nil {
+		p.web.Observe(e)
+	}
+	if pe := e.GetProcess(); pe != nil && e.Type == xdrv1.EventType_EVENT_TYPE_PROCESS_EXEC {
+		p.observeExec(pe)
+	}
+}
+
+// observeExec reports executions that application control lists but does
+// not block: monitor mode, or blocking that could not start.
+func (p *Prevention) observeExec(pe *xdrv1.ProcessEvent) {
+	ac := p.appMonitor.Load()
+	if ac == nil {
+		return
+	}
+	p.mu.Lock()
+	enforced := ac.Block && p.execOn
+	p.mu.Unlock()
+	if enforced {
+		return
+	}
+	if rule := policy.AppRule(ac, pe.Exe, pe.Sha256); rule != "" {
+		p.log.Warn("application control match", "path", pe.Exe, "rule", rule, "pid", pe.Pid)
+		p.a.send(appControlEvent("detected", pe.Exe, pe.Sha256, rule, pe.Pid))
 	}
 }
 
@@ -101,6 +199,8 @@ func (p *Prevention) reconcile() {
 
 func (p *Prevention) Run(ctx context.Context) {
 	go p.fim.Run(ctx)
+	go p.web.Run(ctx)
+	go p.dev.Run(ctx)
 	p.apply(ctx)
 	t := time.NewTicker(firewallCheckInterval)
 	defer t.Stop()
@@ -125,8 +225,16 @@ func (p *Prevention) apply(ctx context.Context) {
 	p.mu.Lock()
 	pol := policy.Normalize(proto.Clone(p.policy).(*xdrv1.PreventionPolicy))
 	p.mu.Unlock()
-	p.applyExec(ctx, pol.BlockExec && p.exec.Len() > 0)
+	var app *xdrv1.ApplicationControlPolicy
+	if ac := pol.ApplicationControl; ac.Enabled && ac.Block {
+		app = ac
+	}
+	p.exec.SetRules(pol.AntiMalware.BlockKnownBad, app)
+	p.applyExec(ctx, p.exec.Enforcing())
 	p.applyFirewall(pol.Firewall)
+	p.web.SetPolicy(pol.WebReputation)
+	p.ips.SetPolicy(ctx, pol.IntrusionPrevention)
+	p.dev.SetPolicy(pol.DeviceControl)
 }
 
 func (p *Prevention) applyExec(ctx context.Context, want bool) {
@@ -168,7 +276,7 @@ func (p *Prevention) applyFirewall(fw *xdrv1.FirewallPolicy) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !fw.Enabled {
-		if p.fwScript != "" || firewallPresent() {
+		if p.fwScript != "" || tablePresent(policy.FirewallTable) {
 			if err := nft(policy.DisableFirewall()); err != nil {
 				p.fwErr = err.Error()
 				return
@@ -185,7 +293,7 @@ func (p *Prevention) applyFirewall(fw *xdrv1.FirewallPolicy) {
 		return
 	}
 	script, err := policy.FirewallRules(fw, addrs)
-	if err == nil && script == p.fwScript && firewallPresent() {
+	if err == nil && script == p.fwScript && tablePresent(policy.FirewallTable) {
 		return
 	}
 	if err == nil {
@@ -205,7 +313,7 @@ func (p *Prevention) checkFirewall() {
 	p.mu.Lock()
 	script := p.fwScript
 	p.mu.Unlock()
-	if script == "" || firewallPresent() {
+	if script == "" || tablePresent(policy.FirewallTable) {
 		return
 	}
 	if err := nft(script); err != nil {
@@ -216,27 +324,39 @@ func (p *Prevention) checkFirewall() {
 	p.a.tamperEvent("firewall_restored", "nftables table inet "+policy.FirewallTable+" was deleted and has been re-applied")
 }
 
-func firewallPresent() bool {
+// tablePresent reports whether one of the agent's nftables tables exists.
+func tablePresent(name string) bool {
 	if _, err := exec.LookPath("nft"); err != nil {
 		return false
 	}
-	return exec.Command("nft", "list", "table", "inet", policy.FirewallTable).Run() == nil
+	return exec.Command("nft", "list", "table", "inet", name).Run() == nil
 }
 
 // State is what the agent reports in its heartbeat.
 func (p *Prevention) State() *xdrv1.PreventionState {
 	fimOn, files := p.fim.Status()
+	webAddrs, webBlocking, webErr := p.web.Status()
+	ipsOn, banned, ipsErr := p.ips.Status()
+	devOn, devBlocked := p.dev.Status()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	s := &xdrv1.PreventionState{
 		ExecBlocking: p.execOn, BlockedHashes: uint32(p.exec.Len()),
 		FimActive: fimOn, FimFiles: uint32(files), FirewallApplied: p.fwScript != "",
+		PolicyName: p.policy.GetName(), RealtimeScan: p.realtime.Load(),
+		WebReputationAddrs: uint32(webAddrs), WebReputationBlocking: webBlocking,
+		IntrusionPrevention: ipsOn, BannedAddrs: uint32(banned),
+		DeviceControl: devOn, BlockedDevices: uint32(devBlocked), AppControl: p.appMonitor.Load() != nil,
 	}
 	switch {
 	case p.execErr != "":
 		s.Error = "exec blocking: " + p.execErr
 	case p.fwErr != "":
 		s.Error = "firewall: " + p.fwErr
+	case webErr != "":
+		s.Error = "web reputation: " + webErr
+	case ipsErr != "":
+		s.Error = "intrusion prevention: " + ipsErr
 	}
 	return s
 }

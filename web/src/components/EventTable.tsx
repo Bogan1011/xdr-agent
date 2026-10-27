@@ -2,7 +2,14 @@ import { Fragment, useState } from "react";
 import { Link } from "react-router-dom";
 import { XdrEvent, categoryOf, formatBytes, typeLabels } from "../api";
 
+// Policy module events keep the action in path and the detail in args.
+const policyTypes = new Set(["web_reputation", "intrusion", "device_control", "app_control"]);
+
 function summary(e: XdrEvent): string {
+  if (policyTypes.has(e.type)) {
+    const what = e.type === "app_control" ? e.exe : e.remote_addr || "";
+    return `${e.path[0]?.toUpperCase() ?? ""}${e.path.slice(1)}${what ? ` ${what}` : ""}: ${e.args}`;
+  }
   if (e.type === "agent_tamper") return `${e.path}: ${e.args}`;
   if (e.type === "exec_blocked") return `Blocked ${e.exe}${e.parent_exe ? ` (run by ${e.parent_exe})` : ""}`;
   if (e.type === "fim_change") return `${e.path}: ${e.args.split(" ")[0]}`;
@@ -27,7 +34,12 @@ function Detail({ e }: { e: XdrEvent }) {
     ["Host", e.hostname],
   ];
   const cat = categoryOf(e.type);
-  if (cat === "process") {
+  if (policyTypes.has(e.type)) {
+    rows.push(["Action", e.path], ["Detail", e.args]);
+    if (e.remote_addr) rows.push(["Remote address", e.remote_addr]);
+    if (e.exe) rows.push(["Process", `${e.exe}${e.pid ? ` (pid ${e.pid})` : ""}`]);
+    if (e.user) rows.push(["User", e.user]);
+  } else if (cat === "process") {
     rows.push(["PID / PPID", `${e.pid} / ${e.ppid}`], ["User", `${e.user} (uid ${e.uid})`], ["Executable", e.exe]);
     if (e.args) rows.push(["Command line", e.args]);
     if (e.cwd) rows.push(["Working dir", e.cwd]);

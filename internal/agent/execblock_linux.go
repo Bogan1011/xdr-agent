@@ -23,6 +23,7 @@ import (
 	xdrv1 "github.com/Bogan1011/xdr-agent/gen/xdr/v1"
 	"github.com/Bogan1011/xdr-agent/internal/agent/collector"
 	"github.com/Bogan1011/xdr-agent/internal/agent/procfs"
+	"github.com/Bogan1011/xdr-agent/internal/policy"
 )
 
 // Pseudo and network filesystems are not marked: nothing worth blocking runs
@@ -36,8 +37,8 @@ var execSkipFS = map[string]bool{
 
 const execWorkers = 4
 
-// ExecBlocker denies execution of files whose SHA-256 is on the block list,
-// using fanotify permission events (FAN_OPEN_EXEC_PERM, Linux 5.0+). The
+// ExecBlocker denies execution of files whose SHA-256 is on the block list
+// (hash IOCs) or that an application control rule lists, using fanotify permission events (FAN_OPEN_EXEC_PERM, Linux 5.0+). The
 // kernel holds each exec until the agent answers; closing the fanotify
 // descriptor, e.g. when the agent stops, allows everything again.
 type ExecBlocker struct {
@@ -46,6 +47,9 @@ type ExecBlocker struct {
 	MaxBytes int64
 
 	hashes atomic.Pointer[map[[32]byte]struct{}]
+	// iocOn enforces the hash IOCs; app, when set, the application rules.
+	iocOn atomic.Bool
+	app   atomic.Pointer[xdrv1.ApplicationControlPolicy]
 
 	mu    sync.Mutex
 	cache map[fileKey][32]byte
@@ -63,7 +67,20 @@ func NewExecBlocker(log *slog.Logger, emit collector.Emit, maxBytes int64) *Exec
 	b := &ExecBlocker{Log: log, Emit: emit, MaxBytes: maxBytes, cache: map[fileKey][32]byte{}}
 	empty := map[[32]byte]struct{}{}
 	b.hashes.Store(&empty)
+	b.iocOn.Store(true)
 	return b
+}
+
+// SetRules chooses what is enforced: the hash IOCs, and application control
+// rules (nil for none).
+func (b *ExecBlocker) SetRules(iocs bool, app *xdrv1.ApplicationControlPolicy) {
+	b.iocOn.Store(iocs)
+	b.app.Store(app)
+}
+
+// Enforcing reports whether any rule would block something.
+func (b *ExecBlocker) Enforcing() bool {
+	return b.iocOn.Load() && b.Len() > 0 || b.app.Load() != nil
 }
 
 // SetHashes replaces the block list with concatenated 32-byte digests.
@@ -217,9 +234,24 @@ func (b *ExecBlocker) handle(f *os.File, m unix.FanotifyEventMetadata) {
 	allow := true
 	var sum [32]byte
 	var hashed bool
-	if int(m.Pid) != os.Getpid() && b.Len() > 0 {
-		sum, hashed = b.hash(int(m.Fd))
-		allow = !hashed || !b.blocked(sum)
+	var path, rule string
+	app := b.app.Load()
+	iocs := b.iocOn.Load() && b.Len() > 0
+	if int(m.Pid) != os.Getpid() && (iocs || app != nil) {
+		if iocs || len(app.GetBlockedSha256()) > 0 {
+			sum, hashed = b.hash(int(m.Fd))
+		}
+		if iocs && hashed && b.blocked(sum) {
+			allow = false
+		} else if app != nil {
+			path, _ = os.Readlink("/proc/self/fd/" + strconv.Itoa(int(m.Fd)))
+			sha := ""
+			if hashed {
+				sha = hex.EncodeToString(sum[:])
+			}
+			rule = policy.AppRule(app, path, sha)
+			allow = rule == ""
+		}
 	}
 	resp := unix.FanotifyResponse{Fd: m.Fd, Response: unix.FAN_ALLOW}
 	if !allow {
@@ -232,7 +264,15 @@ func (b *ExecBlocker) handle(f *os.File, m unix.FanotifyEventMetadata) {
 		b.Log.Warn("fanotify response failed", "err", err)
 	}
 	if !allow {
-		b.report(int(m.Fd), uint32(m.Pid), hex.EncodeToString(sum[:]))
+		sha := ""
+		if hashed {
+			sha = hex.EncodeToString(sum[:])
+		}
+		if rule != "" {
+			b.reportApp(path, uint32(m.Pid), sha, rule)
+		} else {
+			b.report(int(m.Fd), uint32(m.Pid), sha)
+		}
 	}
 	unix.Close(int(m.Fd))
 }
@@ -288,4 +328,25 @@ func (b *ExecBlocker) report(fd int, pid uint32, sha string) {
 	e := collector.NewEvent(xdrv1.EventType_EVENT_TYPE_EXEC_BLOCKED)
 	e.Payload = &xdrv1.Event_Process{Process: pe}
 	b.Emit(e)
+}
+
+// reportApp raises the event for an exec denied by application control.
+func (b *ExecBlocker) reportApp(path string, pid uint32, sha, rule string) {
+	b.Log.Warn("execution blocked by application control", "path", path, "rule", rule, "pid", pid)
+	b.Emit(appControlEvent("blocked", path, sha, rule, pid))
+}
+
+// appControlEvent describes a file an application control rule matched; pid
+// is the process that ran (or tried to run) it.
+func appControlEvent(action, path, sha, rule string, pid uint32) *xdrv1.Event {
+	pe := &xdrv1.PolicyEvent{Action: action, Exe: path, Sha256: sha, Pid: pid, Detail: "matched " + rule}
+	if info, err := procfs.Read(pid); err == nil {
+		pe.User = info.User
+		if action == "blocked" {
+			pe.Detail += ", run by " + info.Exe
+		}
+	}
+	e := collector.NewEvent(xdrv1.EventType_EVENT_TYPE_APP_CONTROL)
+	e.Payload = &xdrv1.Event_Policy{Policy: pe}
+	return e
 }

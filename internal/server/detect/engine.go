@@ -150,14 +150,53 @@ func BlockList(iocs []store.IOC, limit int) []byte {
 }
 
 // ContentVersion identifies a YARA bundle and block list; empty when both are.
-func ContentVersion(yaraSrc string, blocked []byte) string {
-	if yaraSrc == "" && len(blocked) == 0 {
+// NetworkBlockList returns the IP (or CIDR) and domain IOCs for web
+// reputation, manual indicators first, each list capped at limit.
+func NetworkBlockList(iocs []store.IOC, limit int) (ips, domains []string) {
+	var mIP, fIP, mDom, fDom []string
+	seen := map[string]bool{}
+	for _, i := range iocs {
+		v := strings.ToLower(strings.TrimSpace(i.Value))
+		if v == "" || seen[i.Type+v] {
+			continue
+		}
+		seen[i.Type+v] = true
+		switch i.Type {
+		case "ip":
+			if _, err := netip.ParsePrefix(v); err != nil {
+				if _, err := netip.ParseAddr(v); err != nil {
+					continue
+				}
+			}
+			if i.FeedID == 0 {
+				mIP = append(mIP, v)
+			} else {
+				fIP = append(fIP, v)
+			}
+		case "domain":
+			if i.FeedID == 0 {
+				mDom = append(mDom, v)
+			} else {
+				fDom = append(fDom, v)
+			}
+		}
+	}
+	ips, domains = append(mIP, fIP...), append(mDom, fDom...)
+	return ips[:min(len(ips), limit)], domains[:min(len(domains), limit)]
+}
+
+func ContentVersion(yaraSrc string, blocked []byte, ips, domains []string) string {
+	if yaraSrc == "" && len(blocked) == 0 && len(ips) == 0 && len(domains) == 0 {
 		return ""
 	}
 	h := sha256.New()
 	h.Write([]byte(yaraSrc))
 	h.Write([]byte{0})
 	h.Write(blocked)
+	for _, l := range [][]string{ips, domains} {
+		h.Write([]byte{0})
+		h.Write([]byte(strings.Join(l, "\n")))
+	}
 	return hex.EncodeToString(h.Sum(nil)[:8])
 }
 
@@ -256,7 +295,8 @@ func (e *Engine) Evaluate(ev *store.Event) []Match {
 		}
 	}
 	if ev.Type == "yara_match" {
-		for _, name := range strings.Split(ev.Args, ",") {
+		names, _, _ := strings.Cut(ev.Args, ";")
+		for _, name := range strings.Split(names, ",") {
 			name = strings.TrimSpace(name)
 			if name == "" {
 				continue
@@ -273,12 +313,13 @@ func (e *Engine) Evaluate(ev *store.Event) []Match {
 	}
 	// A blocked exec raises its own alert; the hash is on the list because
 	// it is an IOC, so a second IOC alert would only repeat it.
-	if ev.SHA256 != "" && ev.Type != "exec_blocked" {
+	if ev.SHA256 != "" && ev.Type != "exec_blocked" && ev.Type != "app_control" {
 		if i, ok := e.hashes[strings.ToLower(ev.SHA256)]; ok {
 			out = append(out, iocMatch(i, ev.SHA256))
 		}
 	}
-	if ev.RemoteAddr != "" {
+	// A web reputation event is the agent acting on the same IOC.
+	if ev.RemoteAddr != "" && ev.Type != "web_reputation" {
 		if a, err := netip.ParseAddr(ev.RemoteAddr); err == nil {
 			a = a.Unmap()
 			if i, ok := e.ips[a]; ok {

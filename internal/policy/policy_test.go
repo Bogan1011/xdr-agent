@@ -94,13 +94,30 @@ func TestFirewallRules(t *testing.T) {
 
 func TestJSONRoundTrip(t *testing.T) {
 	p := Default()
-	p.BlockExec = true
+	p.AntiMalware.BlockKnownBad = true
 	raw := MarshalJSON(p)
-	if !strings.Contains(string(raw), `"block_exec":true`) || !strings.Contains(string(raw), `"rules":[]`) {
+	if !strings.Contains(string(raw), `"block_known_bad":true`) || !strings.Contains(string(raw), `"rules":[]`) {
 		t.Fatalf("unexpected JSON %s", raw)
 	}
 	back, err := UnmarshalJSON(raw)
-	if err != nil || !back.BlockExec || len(back.Fim.Paths) != len(p.Fim.Paths) {
+	if err != nil || !back.AntiMalware.BlockKnownBad || len(back.Fim.Paths) != len(p.Fim.Paths) {
 		t.Fatalf("round trip: %v %v", back, err)
+	}
+}
+
+func TestLegacyPolicy(t *testing.T) {
+	p, err := UnmarshalJSON([]byte(`{"block_exec":true,"fim":{"enabled":true,"paths":["/etc"]}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.AntiMalware.Enabled || !p.AntiMalware.BlockKnownBad || p.BlockExec {
+		t.Errorf("anti-malware not migrated: %v", p.AntiMalware)
+	}
+	am := p.ActivityMonitoring
+	if !am.Process || !am.File || !am.Network || p.DeviceControl.UsbStorage != "allow" || p.IntrusionPrevention.MaxFailures != 5 {
+		t.Errorf("defaults not filled: %v", p)
+	}
+	if err := Validate(p); err != nil {
+		t.Error(err)
 	}
 }

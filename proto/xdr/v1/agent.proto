@@ -97,11 +97,81 @@ message HeartbeatResponse {
 
 // PreventionPolicy is what the agent enforces on the host, as opposed to
 // what it only reports.
+//
+// The console edits it as a named policy with one module per section; each
+// endpoint is assigned one policy.
 message PreventionPolicy {
-  // Deny execution of files whose SHA-256 is a hash IOC (fanotify).
+  // Deprecated: anti_malware.block_known_bad. Read only to migrate policies
+  // saved before modules existed.
   bool block_exec = 1;
   FimPolicy fim = 2;
   FirewallPolicy firewall = 3;
+  AntiMalwarePolicy anti_malware = 4;
+  WebReputationPolicy web_reputation = 5;
+  IntrusionPreventionPolicy intrusion_prevention = 6;
+  DeviceControlPolicy device_control = 7;
+  ActivityMonitoringPolicy activity_monitoring = 8;
+  ApplicationControlPolicy application_control = 9;
+  // The console's name for the policy, shown in the agent's log.
+  string name = 10;
+}
+
+message AntiMalwarePolicy {
+  // Real-time YARA scanning of new and changed files and executed binaries.
+  bool enabled = 1;
+  // Deny execution of files whose SHA-256 is a hash IOC (fanotify).
+  bool block_known_bad = 2;
+  // Move files that match a YARA rule into quarantine.
+  bool auto_quarantine = 3;
+}
+
+// Outbound connections to known-bad addresses: IP and domain IOCs from threat
+// intel and the policy's own domains, resolved by the agent.
+message WebReputationPolicy {
+  bool enabled = 1;
+  // Reject the connections; otherwise only report them.
+  bool block = 2;
+  bool use_threat_intel = 3;
+  repeated string blocked_domains = 4;
+  // Never blocked, even when threat intel lists them.
+  repeated string allowed_domains = 5;
+}
+
+// Brute-force protection: repeated failed SSH logins from one address.
+message IntrusionPreventionPolicy {
+  bool enabled = 1;
+  // Ban the address with nftables; otherwise only report it.
+  bool prevent = 2;
+  uint32 max_failures = 3;
+  uint32 window_seconds = 4;
+  uint32 ban_minutes = 5;
+  // IPs or CIDRs that are never banned.
+  repeated string allow = 6;
+}
+
+message DeviceControlPolicy {
+  bool enabled = 1;
+  // USB mass storage: allow or block.
+  string usb_storage = 2;
+  // vendor:product IDs (hex, e.g. "0781:5583") that are always allowed.
+  repeated string allowed_devices = 3;
+}
+
+// Which telemetry the agent sends. Prevention and detection events are
+// always sent.
+message ActivityMonitoringPolicy {
+  bool process = 1;
+  bool file = 2;
+  bool network = 3;
+}
+
+message ApplicationControlPolicy {
+  bool enabled = 1;
+  // Deny execution of matching files; otherwise only report it.
+  bool block = 2;
+  // Path prefixes, or globs when they contain * ? or [.
+  repeated string blocked_paths = 3;
+  repeated string blocked_sha256 = 4;
 }
 
 // File integrity monitoring: a baseline of hashes, owners and modes for the
@@ -147,6 +217,16 @@ message PreventionState {
   bool firewall_applied = 5;
   // Why part of the policy could not be applied, if it could not.
   string error = 6;
+  string policy_name = 7;
+  bool realtime_scan = 8;
+  // Addresses on the web reputation block list.
+  uint32 web_reputation_addrs = 9;
+  bool web_reputation_blocking = 10;
+  bool intrusion_prevention = 11;
+  uint32 banned_addrs = 12;
+  bool device_control = 13;
+  uint32 blocked_devices = 14;
+  bool app_control = 15;
 }
 
 message PamPolicy {
@@ -207,6 +287,9 @@ message DetectionContent {
   string yara_rules = 2;
   // SHA-256 hash IOCs as concatenated 32-byte digests, for exec blocking.
   bytes blocked_sha256 = 3;
+  // IP (or CIDR) and domain IOCs, for web reputation.
+  repeated string bad_ips = 4;
+  repeated string bad_domains = 5;
 }
 
 message AgentBinaryRequest {
@@ -247,6 +330,11 @@ enum EventType {
   EVENT_TYPE_EXEC_BLOCKED = 13;
   // A monitored file differs from its FIM baseline (file payload).
   EVENT_TYPE_FIM_CHANGE = 14;
+  // Policy module events (policy payload).
+  EVENT_TYPE_WEB_REPUTATION = 15;
+  EVENT_TYPE_INTRUSION = 16;
+  EVENT_TYPE_DEVICE_CONTROL = 17;
+  EVENT_TYPE_APP_CONTROL = 18;
 }
 
 message Event {
@@ -259,6 +347,7 @@ message Event {
     NetworkEvent network = 12;
     YaraMatch yara = 13;
     TamperEvent tamper = 14;
+    PolicyEvent policy = 15;
   }
 }
 
@@ -313,6 +402,8 @@ message YaraMatch {
   // The process whose binary matched, when the scan came from an exec.
   uint32 pid = 4;
   uint64 size = 5;
+  // "quarantined" when anti-malware moved the file away.
+  string action = 6;
 }
 
 // Something tried to stop, change or remove the agent, or protection changed.
@@ -322,6 +413,18 @@ message TamperEvent {
   string detail = 2;
   uint32 pid = 3;
   string exe = 4;
+}
+
+// What a policy module saw or did.
+message PolicyEvent {
+  // blocked, detected, banned or connected.
+  string action = 1;
+  string detail = 2;
+  string remote_addr = 3;
+  uint32 pid = 4;
+  string exe = 5;
+  string sha256 = 6;
+  string user = 7;
 }
 
 message ElevationRequest {

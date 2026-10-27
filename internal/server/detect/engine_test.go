@@ -81,6 +81,12 @@ func TestBuiltinRules(t *testing.T) {
 			[]string{"xdr-exec-blocked"}},
 		{"fim shadow", store.Event{Type: "fim_change", Path: "/etc/shadow", Args: "content old_sha256=00"}, []string{"xdr-fim-critical"}},
 		{"fim binary", store.Event{Type: "fim_change", Path: "/usr/bin/ls", Args: "added"}, []string{"xdr-fim-system-binary"}},
+		{"web reputation, no duplicate ioc alert", store.Event{Type: "web_reputation", Path: "blocked", RemoteAddr: "203.0.113.9"}, []string{"xdr-web-reputation"}},
+		{"ssh brute force", store.Event{Type: "intrusion", Path: "banned", RemoteAddr: "198.51.100.4"}, []string{"xdr-ssh-bruteforce"}},
+		{"usb connected", store.Event{Type: "device_control", Path: "connected"}, nil},
+		{"usb blocked", store.Event{Type: "device_control", Path: "blocked"}, []string{"xdr-usb-storage-blocked"}},
+		{"app control", store.Event{Type: "app_control", Path: "blocked", Exe: "/tmp/x"}, []string{"xdr-app-control"}},
+		{"yara quarantined", store.Event{Type: "yara_match", Path: "/tmp/x", Args: "EICAR; quarantined"}, []string{"yara:EICAR"}},
 		{"fim other", store.Event{Type: "fim_change", Path: "/etc/hosts", Args: "permissions"}, []string{"xdr-fim-change"}},
 		{"firewall restored", store.Event{Type: "agent_tamper", Path: "firewall_restored"}, []string{"xdr-agent-tamper"}},
 	}
@@ -166,7 +172,7 @@ func TestBlockList(t *testing.T) {
 	if got := BlockList(iocs, 1); len(got) != 32 || got[0] != 0xaa {
 		t.Fatalf("capped block list = %x", got)
 	}
-	if ContentVersion("", nil) != "" || ContentVersion("", got) == ContentVersion("", nil) {
+	if ContentVersion("", nil, nil, nil) != "" || ContentVersion("", got, nil, nil) == ContentVersion("", nil, nil, nil) || ContentVersion("", nil, []string{"1.2.3.4"}, nil) == "" {
 		t.Fatal("content version must change with the block list")
 	}
 }
