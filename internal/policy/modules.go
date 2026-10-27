@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	xdrv1 "github.com/Bogan1011/xdr-agent/gen/xdr/v1"
@@ -29,6 +30,16 @@ var (
 	domainRe = regexp.MustCompile(`^(?i)([a-z0-9_]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$`)
 	deviceRe = regexp.MustCompile(`^[0-9a-f]{4}:[0-9a-f]{4}$`)
 	sha256Re = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+	// DefaultAllowedPaths is what lockdown allows when the policy names
+	// nothing: the system and package-managed locations, including
+	// container images, so the host keeps booting and updating.
+	DefaultAllowedPaths = []string{
+		"/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/opt", "/snap",
+		"/etc", "/var/lib/docker", "/var/lib/containerd", "/var/lib/snapd",
+	}
+	// DefaultScriptPaths are the world-writable places droppers use.
+	DefaultScriptPaths = []string{"/tmp", "/var/tmp", "/dev/shm"}
 )
 
 // normalizeModules fills missing modules. A policy saved before modules
@@ -71,8 +82,17 @@ func normalizeModules(p *xdrv1.PreventionPolicy) {
 	if p.ApplicationControl == nil {
 		p.ApplicationControl = &xdrv1.ApplicationControlPolicy{}
 	}
-	for i, h := range p.ApplicationControl.BlockedSha256 {
-		p.ApplicationControl.BlockedSha256[i] = strings.ToLower(strings.TrimSpace(h))
+	ac := p.ApplicationControl
+	for _, l := range [][]string{ac.BlockedSha256, ac.AllowedSha256} {
+		for i, h := range l {
+			l[i] = strings.ToLower(strings.TrimSpace(h))
+		}
+	}
+	if ac.Lockdown && len(ac.AllowedPaths) == 0 {
+		ac.AllowedPaths = append([]string{}, DefaultAllowedPaths...)
+	}
+	if ac.BlockScripts && len(ac.ScriptPaths) == 0 {
+		ac.ScriptPaths = append([]string{}, DefaultScriptPaths...)
 	}
 	wr := p.WebReputation
 	for _, l := range [][]string{wr.BlockedDomains, wr.AllowedDomains} {
@@ -126,10 +146,11 @@ func validateModules(p *xdrv1.PreventionPolicy) error {
 	}
 
 	ac := p.ApplicationControl
-	if len(ac.BlockedPaths) > maxAppPaths || len(ac.BlockedSha256) > maxAppHashes {
-		return fmt.Errorf("application control: at most %d paths and %d hashes", maxAppPaths, maxAppHashes)
+	if len(ac.BlockedPaths) > maxAppPaths || len(ac.BlockedSha256) > maxAppHashes ||
+		len(ac.AllowedPaths) > maxAppPaths || len(ac.AllowedSha256) > maxAppHashes || len(ac.ScriptPaths) > maxAppPaths {
+		return fmt.Errorf("application control: at most %d paths and %d hashes per list", maxAppPaths, maxAppHashes)
 	}
-	for _, s := range ac.BlockedPaths {
+	for _, s := range append(append(append([]string{}, ac.BlockedPaths...), ac.AllowedPaths...), ac.ScriptPaths...) {
 		if !strings.HasPrefix(s, "/") {
 			return fmt.Errorf("application control: path %q must be absolute", s)
 		}
@@ -137,18 +158,25 @@ func validateModules(p *xdrv1.PreventionPolicy) error {
 			return fmt.Errorf("application control: bad pattern %q", s)
 		}
 	}
-	for _, h := range ac.BlockedSha256 {
+	for _, h := range append(append([]string{}, ac.BlockedSha256...), ac.AllowedSha256...) {
 		if !sha256Re.MatchString(h) {
 			return fmt.Errorf("application control: %q is not a SHA-256", h)
 		}
 	}
-	if ac.Enabled && len(ac.BlockedPaths)+len(ac.BlockedSha256) == 0 {
-		return fmt.Errorf("application control: add at least one path or hash")
+	if ac.Enabled && !ac.Lockdown && !ac.BlockScripts && len(ac.BlockedPaths)+len(ac.BlockedSha256) == 0 {
+		return fmt.Errorf("application control: add at least one path or hash, or turn on lockdown or script blocking")
+	}
+	for _, s := range ac.ScriptPaths {
+		if s == "/" {
+			return fmt.Errorf("application control: script folders cannot include /")
+		}
 	}
 	return nil
 }
 
-// AppRule reports which application control rule matches a file, if any.
+// AppRule reports which application control rule stops a file, if any. The
+// block lists come first; in lockdown anything not on the allow-list is
+// stopped too. sha is "" when the file could not be hashed.
 func AppRule(ac *xdrv1.ApplicationControlPolicy, path, sha string) string {
 	if ac == nil {
 		return ""
@@ -165,7 +193,130 @@ func AppRule(ac *xdrv1.ApplicationControlPolicy, path, sha string) string {
 			return "path " + p
 		}
 	}
+	if ac.Lockdown && !AppAllowed(ac, path, sha) {
+		return "lockdown (not on the allow-list)"
+	}
 	return ""
+}
+
+// AppAllowed reports whether lockdown lets the file run.
+func AppAllowed(ac *xdrv1.ApplicationControlPolicy, path, sha string) bool {
+	if path != "" && Matches(path, ac.AllowedPaths) {
+		return true
+	}
+	return sha != "" && slices.Contains(ac.AllowedSha256, sha)
+}
+
+// AppNeedsHash reports whether AppRule may need the file's hash to decide
+// on path.
+func AppNeedsHash(ac *xdrv1.ApplicationControlPolicy, path string) bool {
+	if ac == nil {
+		return false
+	}
+	if len(ac.BlockedSha256) > 0 {
+		return true
+	}
+	return ac.Lockdown && len(ac.AllowedSha256) > 0 && !Matches(path, ac.AllowedPaths)
+}
+
+var interpreterRe = regexp.MustCompile(`^(sh|bash|dash|zsh|ksh|mksh|fish|busybox|python[0-9.]*|perl[0-9.]*|ruby[0-9.]*|php[0-9.]*|node|nodejs|lua[0-9.]*|tclsh[0-9.]*|pwsh|osascript)$`)
+
+// IsInterpreter reports whether exe is a shell or script interpreter.
+func IsInterpreter(exe string) bool {
+	return interpreterRe.MatchString(filepath.Base(exe))
+}
+
+// Options that take the next argument as their value, by interpreter.
+var valueOpts = map[string][]string{
+	"python": {"-W", "-X", "-Q"},
+	"sh":     {"-o", "-O", "--rcfile", "--init-file"},
+	"perl":   {"-I", "-M", "-m"},
+	"ruby":   {"-I", "-r"},
+	"node":   {"-r", "--require", "--import"},
+}
+
+// Options after which the program is inline code or a module, not a file.
+var codeOpts = map[string][]string{
+	"python": {"-c", "-m"},
+	"sh":     {"-c"},
+	"perl":   {"-e", "-E"},
+	"ruby":   {"-e"},
+	"node":   {"-e", "--eval", "-p", "--print"},
+}
+
+func family(exe string) string {
+	base := filepath.Base(exe)
+	for _, f := range []string{"python", "perl", "ruby", "node"} {
+		if strings.HasPrefix(base, f) {
+			return f
+		}
+	}
+	return "sh"
+}
+
+// ScriptArg returns the script file an interpreter was started with, as an
+// absolute path: the first argument after argv[0] that is not an option.
+// Inline code (bash -c, python -c) has no script and returns "".
+func ScriptArg(exe string, args []string, cwd string) string {
+	fam := family(exe)
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			if i+1 >= len(args) {
+				return ""
+			}
+			a = args[i+1]
+		} else if strings.HasPrefix(a, "-") || strings.HasPrefix(a, "+") {
+			if slices.Contains(codeOpts[fam], a) {
+				return ""
+			}
+			if slices.Contains(valueOpts[fam], a) {
+				i++
+			}
+			continue
+		}
+		return absPath(a, cwd)
+	}
+	return ""
+}
+
+// ScriptOpened reports whether path is one of the process's arguments, i.e.
+// an interpreter opening the script it was asked to run.
+func ScriptOpened(args []string, cwd, path string) bool {
+	for _, a := range args[min(1, len(args)):] {
+		if a != "" && absPath(a, cwd) == path {
+			return true
+		}
+	}
+	return false
+}
+
+func absPath(a, cwd string) string {
+	if a == "" {
+		return ""
+	}
+	if !filepath.IsAbs(a) {
+		if cwd == "" {
+			return ""
+		}
+		a = filepath.Join(cwd, a)
+	}
+	return filepath.Clean(a)
+}
+
+// ScriptRule reports the script folder rule an interpreter run breaks, if
+// script blocking is on and exe runs a script from one of the folders.
+func ScriptRule(ac *xdrv1.ApplicationControlPolicy, exe string, args []string, cwd string) (script, rule string) {
+	if ac == nil || !ac.BlockScripts || !IsInterpreter(exe) {
+		return "", ""
+	}
+	script = ScriptArg(exe, args, cwd)
+	for _, p := range ac.ScriptPaths {
+		if script != "" && Matches(script, []string{p}) {
+			return script, "script in " + p
+		}
+	}
+	return "", ""
 }
 
 // DomainListed reports whether host is one of the domains or a subdomain of one.

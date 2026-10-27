@@ -215,7 +215,7 @@ function PreventionStatus({ state: s, modules }: { state: PreventionState; modul
         <div><dt>Firewall</dt><dd>{on(s.firewall_applied, "Applied")}</dd></div>
         <div><dt>Intrusion prevention</dt><dd>{on(s.intrusion_prevention, `Active · ${s.banned_addrs ?? 0} banned`)}</dd></div>
         <div><dt>Device control</dt><dd>{on(s.device_control, `Active · ${s.blocked_devices ?? 0} blocked`)}</dd></div>
-        <div><dt>Application control</dt><dd>{on(s.app_control, s.exec_blocking ? "Enforcing" : "Active")}</dd></div>
+        <div><dt>Application control</dt><dd>{on(s.app_control, s.exec_blocking ? "Enforcing" : "Active")}{s.script_blocking && <> · scripts blocked</>}</dd></div>
       </dl>
     </>
   );

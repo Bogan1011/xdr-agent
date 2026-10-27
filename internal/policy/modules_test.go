@@ -77,3 +77,47 @@ func TestNftScripts(t *testing.T) {
 		t.Errorf("ban: %q", b)
 	}
 }
+
+func TestLockdownAndScripts(t *testing.T) {
+	p := Default()
+	ac := p.ApplicationControl
+	ac.Enabled, ac.Lockdown, ac.BlockScripts = true, true, true
+	ac.BlockedPaths = []string{"/usr/bin/nc"}
+	ac.AllowedSha256 = []string{strings.Repeat("cd", 32)}
+	Normalize(p)
+	if err := validateModules(p); err != nil {
+		t.Fatal(err)
+	}
+	if AppRule(ac, "/usr/bin/ls", "") != "" {
+		t.Error("default allow-list should allow /usr")
+	}
+	if AppRule(ac, "/usr/bin/nc", "") == "" {
+		t.Error("block list should win over the allow-list")
+	}
+	if AppRule(ac, "/home/u/tool", "") == "" || AppRule(ac, "/home/u/tool", strings.Repeat("cd", 32)) != "" {
+		t.Error("lockdown by path and hash")
+	}
+	if !AppNeedsHash(ac, "/home/u/tool") || AppNeedsHash(&xdrv1.ApplicationControlPolicy{Lockdown: true}, "/x") {
+		t.Error("AppNeedsHash")
+	}
+	for _, c := range []struct {
+		exe  string
+		args []string
+		want string
+	}{
+		{"/usr/bin/bash", []string{"bash", "-x", "x.sh"}, "/tmp/x.sh"},
+		{"/usr/bin/dash", []string{"sh", "-c", "/tmp/x.sh"}, ""},
+		{"/usr/bin/python3.12", []string{"python3", "-X", "dev", "/tmp/a/y.py"}, "/tmp/a/y.py"},
+		{"/usr/bin/python3", []string{"python3", "-m", "http.server"}, ""},
+		{"/usr/bin/perl", []string{"perl", "-e", "print 1"}, ""},
+		{"/usr/bin/ls", []string{"ls", "/tmp/x"}, ""},
+	} {
+		got, _ := ScriptRule(ac, c.exe, c.args, "/tmp")
+		if got != c.want {
+			t.Errorf("%v: got %q want %q", c.args, got, c.want)
+		}
+	}
+	if !ScriptOpened([]string{"bash", "-x", "./x.sh"}, "/tmp", "/tmp/x.sh") || ScriptOpened([]string{"bash"}, "/tmp", "/tmp/x.sh") {
+		t.Error("ScriptOpened")
+	}
+}

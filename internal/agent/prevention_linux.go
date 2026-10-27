@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,6 +34,7 @@ type Prevention struct {
 	web  *WebReputation
 	ips  *Intrusion
 	dev  *DeviceControl
+	scr  *ScriptBlocker
 
 	// Read on every event, so kept outside mu.
 	realtime, quarantine        atomic.Bool
@@ -56,6 +59,7 @@ func newPrevention(a *Agent, log *slog.Logger) *Prevention {
 		web:        NewWebReputation(log.With("component", "web-reputation"), a.send, a.consoleAddrs),
 		ips:        NewIntrusion(log.With("component", "intrusion"), a.send, a.consoleAddrs),
 		dev:        NewDeviceControl(log.With("component", "device-control"), a.send, a.cfg.path("devctl.json")),
+		scr:        NewScriptBlocker(log.With("component", "script-block"), a.send),
 		reconcileC: make(chan struct{}, 1),
 	}
 	pol := &xdrv1.PreventionPolicy{}
@@ -172,11 +176,25 @@ func (p *Prevention) Observe(e *xdrv1.Event) {
 }
 
 // observeExec reports executions that application control lists but does
-// not block: monitor mode, or blocking that could not start.
+// not block: monitor mode, or blocking that could not start. Interpreters
+// started on a script the script blocker cannot see yet are stopped here.
 func (p *Prevention) observeExec(pe *xdrv1.ProcessEvent) {
 	ac := p.appMonitor.Load()
 	if ac == nil {
 		return
+	}
+	if script, rule := policy.ScriptRule(ac, pe.Exe, pe.Args, pe.Cwd); rule != "" {
+		switch {
+		case !ac.Block:
+			p.log.Warn("script from a script folder", "path", script, "rule", rule, "pid", pe.Pid)
+			p.a.send(appControlEvent("detected", script, "", rule, pe.Pid))
+		case !p.scr.Covers(filepath.Dir(script)):
+			_, err := killProcess(map[string]string{"pid": strconv.Itoa(int(pe.Pid)), "exe": pe.Exe})
+			p.log.Warn("script stopped after start", "path", script, "rule", rule, "pid", pe.Pid, "err", err)
+			if err == nil {
+				p.a.send(appControlEvent("blocked", script, "", rule+", stopped after start", pe.Pid))
+			}
+		}
 	}
 	p.mu.Lock()
 	enforced := ac.Block && p.execOn
@@ -201,6 +219,7 @@ func (p *Prevention) Run(ctx context.Context) {
 	go p.fim.Run(ctx)
 	go p.web.Run(ctx)
 	go p.dev.Run(ctx)
+	go p.scr.Run(ctx)
 	p.apply(ctx)
 	t := time.NewTicker(firewallCheckInterval)
 	defer t.Stop()
@@ -235,6 +254,7 @@ func (p *Prevention) apply(ctx context.Context) {
 	p.web.SetPolicy(pol.WebReputation)
 	p.ips.SetPolicy(ctx, pol.IntrusionPrevention)
 	p.dev.SetPolicy(pol.DeviceControl)
+	p.scr.SetPolicy(pol.ApplicationControl)
 }
 
 func (p *Prevention) applyExec(ctx context.Context, want bool) {
@@ -338,6 +358,7 @@ func (p *Prevention) State() *xdrv1.PreventionState {
 	webAddrs, webBlocking, webErr := p.web.Status()
 	ipsOn, banned, ipsErr := p.ips.Status()
 	devOn, devBlocked := p.dev.Status()
+	scrOn, _, scrErr := p.scr.Status()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	s := &xdrv1.PreventionState{
@@ -347,6 +368,7 @@ func (p *Prevention) State() *xdrv1.PreventionState {
 		WebReputationAddrs: uint32(webAddrs), WebReputationBlocking: webBlocking,
 		IntrusionPrevention: ipsOn, BannedAddrs: uint32(banned),
 		DeviceControl: devOn, BlockedDevices: uint32(devBlocked), AppControl: p.appMonitor.Load() != nil,
+		ScriptBlocking: scrOn,
 	}
 	switch {
 	case p.execErr != "":
@@ -357,6 +379,8 @@ func (p *Prevention) State() *xdrv1.PreventionState {
 		s.Error = "web reputation: " + webErr
 	case ipsErr != "":
 		s.Error = "intrusion prevention: " + ipsErr
+	case scrErr != "" && !scrOn:
+		s.Error = "script blocking: " + scrErr
 	}
 	return s
 }

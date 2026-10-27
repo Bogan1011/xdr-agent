@@ -238,13 +238,15 @@ func (b *ExecBlocker) handle(f *os.File, m unix.FanotifyEventMetadata) {
 	app := b.app.Load()
 	iocs := b.iocOn.Load() && b.Len() > 0
 	if int(m.Pid) != os.Getpid() && (iocs || app != nil) {
-		if iocs || len(app.GetBlockedSha256()) > 0 {
+		if app != nil {
+			path, _ = os.Readlink("/proc/self/fd/" + strconv.Itoa(int(m.Fd)))
+		}
+		if iocs || policy.AppNeedsHash(app, path) {
 			sum, hashed = b.hash(int(m.Fd))
 		}
 		if iocs && hashed && b.blocked(sum) {
 			allow = false
 		} else if app != nil {
-			path, _ = os.Readlink("/proc/self/fd/" + strconv.Itoa(int(m.Fd)))
 			sha := ""
 			if hashed {
 				sha = hex.EncodeToString(sum[:])

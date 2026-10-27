@@ -285,7 +285,17 @@ export interface PreventionPolicy {
   };
   device_control: { enabled: boolean; usb_storage: "allow" | "block"; allowed_devices: string[] };
   activity_monitoring: { process: boolean; file: boolean; network: boolean };
-  application_control: { enabled: boolean; block: boolean; blocked_paths: string[]; blocked_sha256: string[] };
+  application_control: {
+    enabled: boolean;
+    block: boolean;
+    blocked_paths: string[];
+    blocked_sha256: string[];
+    lockdown: boolean;
+    allowed_paths: string[];
+    allowed_sha256: string[];
+    block_scripts: boolean;
+    script_paths: string[];
+  };
 }
 
 export interface PreventionState {
@@ -304,6 +314,7 @@ export interface PreventionState {
   device_control?: boolean;
   blocked_devices?: number;
   app_control?: boolean;
+  script_blocking?: boolean;
 }
 
 export interface PolicySummary {
