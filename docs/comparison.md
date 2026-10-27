@@ -1,6 +1,6 @@
 # How we compare: Trend Micro Vision One and CrowdStrike Falcon
 
-Status as of release 0.3.0 (Linux agent, single-tenant console). The
+Status as of release 0.4.0 (Linux agent, single-tenant console). The
 competitor columns describe what their commercial platforms offer in
 general; exact features depend on the licence tier, and both vendors change
 their line-ups often, so check current datasheets before quoting this
@@ -19,11 +19,11 @@ Legend: ✅ have it · 🟡 partial · ❌ not yet
 | Containers / Kubernetes | 🟡 host-level events only | ✅ Container Security | ✅ Falcon Cloud Security |
 | Cloud workloads, agentless posture | ❌ | ✅ | ✅ |
 | **Prevention** | | | |
-| Signature anti-malware | 🟡 YARA + SHA-256 IOCs | ✅ | ✅ (ML, no signatures) |
+| Signature anti-malware | 🟡 YARA + SHA-256 IOCs, exec blocking of hash IOCs | ✅ | ✅ (ML, no signatures) |
 | Machine-learning file prevention | ❌ | ✅ | ✅ |
 | Exploit / memory protection | ❌ | ✅ | ✅ |
-| Host firewall, IPS / virtual patching | ❌ | ✅ (Deep Security heritage) | 🟡 firewall management |
-| File integrity monitoring | 🟡 file events + rules, no baseline | ✅ | ✅ (FileVantage) |
+| Host firewall, IPS / virtual patching | 🟡 host firewall policy (nftables), no IPS | ✅ (Deep Security heritage) | 🟡 firewall management |
+| File integrity monitoring | ✅ baselines, drift alerts, accept-as-baseline | ✅ | ✅ (FileVantage) |
 | Application control | ❌ | ✅ | 🟡 |
 | Device control (USB) | ❌ | ✅ | ✅ |
 | **Detection and investigation** | | | |
@@ -80,8 +80,10 @@ Legend: ✅ have it · 🟡 partial · ❌ not yet
 3. **Console hardening**: HTTPS by default, multiple users with roles,
    SSO (OIDC), audit log of admin actions, approval by a second person for
    PAM grants. Deep Security-style admin-set agent password (backlog).
-4. **Prevention**: blocking on the agent (deny exec of known-bad hashes via
-   eBPF LSM / fanotify), file integrity baselines, host firewall policy.
+4. **Prevention depth**: exec blocking, FIM baselines and the host firewall
+   shipped in 0.4.0. Next: machine-learning or reputation-based blocking,
+   application control (allow-lists), IPS / virtual patching, and blocking
+   scripts run through an interpreter (fanotify only sees direct execs).
 5. **Vulnerability and posture**: package inventory matched against CVE
    feeds, CIS-style configuration checks, a per-host risk score.
 6. **Live response**: an audited remote shell over the agent's mTLS

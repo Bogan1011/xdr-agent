@@ -93,6 +93,8 @@ var categories = map[string][]string{
 	"agent_tamper":        {"agent_tamper"},
 	"network_listen":      {"net_listen"},
 	"yara":                {"yara_match"},
+	"fim":                 {"fim_change"},
+	"exec_blocked":        {"exec_blocked"},
 }
 
 var levels = map[string]string{

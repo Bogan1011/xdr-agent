@@ -1,0 +1,10 @@
+id: xdr-fim-system-binary
+title: "FIM: system binary changed"
+description: A program in a system binary directory was added, removed or changed outside its baseline. Expected after package updates; record a new baseline once patching is done.
+level: high
+tags: [attack.persistence, attack.defense_evasion, attack.t1554]
+logsource: {product: linux, category: fim}
+detection:
+  binary:
+    path|startswith: [/usr/bin/, /usr/sbin/, /usr/local/bin/, /usr/local/sbin/, /bin/, /sbin/]
+  condition: binary

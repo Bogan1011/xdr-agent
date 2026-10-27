@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	xdrv1 "github.com/Bogan1011/xdr-agent/gen/xdr/v1"
+	"github.com/Bogan1011/xdr-agent/internal/policy"
 	"github.com/Bogan1011/xdr-agent/internal/server/detect"
 	"github.com/Bogan1011/xdr-agent/internal/server/pki"
 	"github.com/Bogan1011/xdr-agent/internal/server/release"
@@ -87,6 +88,7 @@ var commandTypes = map[string]xdrv1.CommandType{
 	"update_agent":     xdrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT,
 	"grant_elevation":  xdrv1.CommandType_COMMAND_TYPE_GRANT_ELEVATION,
 	"revoke_elevation": xdrv1.CommandType_COMMAND_TYPE_REVOKE_ELEVATION,
+	"fim_rebaseline":   xdrv1.CommandType_COMMAND_TYPE_FIM_REBASELINE,
 }
 
 type ctxKey struct{}
@@ -133,7 +135,17 @@ func (s *Agents) Heartbeat(ctx context.Context, req *xdrv1.HeartbeatRequest) (*x
 		s.Log.Warn("agent state update", "agent_id", a.id, "err", err)
 	}
 	resp := &xdrv1.HeartbeatResponse{ServerTimeUnix: time.Now().Unix()}
-	resp.ContentVersion, _ = s.Detect.Content()
+	if req.Prevention != nil {
+		if err := s.DB.SetPreventionState(ctx, a.id, policy.MarshalState(req.Prevention)); err != nil {
+			s.Log.Warn("prevention state update", "agent_id", a.id, "err", err)
+		}
+	}
+	resp.ContentVersion, _, _ = s.Detect.Content()
+	if p, _, err := ResolvePrevention(ctx, s.DB, a.id); err == nil {
+		resp.Prevention = p
+	} else {
+		s.Log.Warn("prevention policy", "agent_id", a.id, "err", err)
+	}
 	if on, tok, err := s.DB.TamperPolicy(ctx, a.id); err == nil {
 		sum := sha256.Sum256([]byte(tok))
 		resp.Tamper = &xdrv1.TamperPolicy{Enabled: on, MaintenanceTokenSha256: hex.EncodeToString(sum[:])}
@@ -163,6 +175,30 @@ func (s *Agents) Heartbeat(ctx context.Context, req *xdrv1.HeartbeatRequest) (*x
 	return resp, nil
 }
 
+// ResolvePrevention returns the policy an endpoint enforces: its own when
+// set (custom is true), else the fleet policy, else the default.
+func ResolvePrevention(ctx context.Context, db *store.Postgres, id string) (p *xdrv1.PreventionPolicy, custom bool, err error) {
+	own, _, err := db.AgentPrevention(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	if own != nil {
+		p, err = policy.UnmarshalJSON(own)
+		return p, true, err
+	}
+	p, err = GlobalPrevention(ctx, db)
+	return p, false, err
+}
+
+// GlobalPrevention is the fleet-wide policy, or the default when unset.
+func GlobalPrevention(ctx context.Context, db *store.Postgres) (*xdrv1.PreventionPolicy, error) {
+	raw, err := db.GlobalPrevention(ctx)
+	if err != nil || raw == nil {
+		return policy.Default(), err
+	}
+	return policy.UnmarshalJSON(raw)
+}
+
 func (s *Agents) SendEvents(ctx context.Context, req *xdrv1.EventBatch) (*xdrv1.SendEventsResponse, error) {
 	a := fromCtx(ctx)
 	if len(req.Events) > maxBatch {
@@ -182,8 +218,8 @@ func (s *Agents) SendEvents(ctx context.Context, req *xdrv1.EventBatch) (*xdrv1.
 }
 
 func (s *Agents) GetDetectionContent(ctx context.Context, _ *xdrv1.DetectionContentRequest) (*xdrv1.DetectionContent, error) {
-	v, src := s.Detect.Content()
-	return &xdrv1.DetectionContent{Version: v, YaraRules: src}, nil
+	v, src, blocked := s.Detect.Content()
+	return &xdrv1.DetectionContent{Version: v, YaraRules: src, BlockedSha256: blocked}, nil
 }
 
 func (s *Agents) ReportCommandResult(ctx context.Context, req *xdrv1.CommandResult) (*xdrv1.CommandResultAck, error) {
@@ -272,6 +308,13 @@ func toRow(a agentCtx, e *xdrv1.Event) store.Event {
 		fe := p.File
 		r.Path, r.OldPath, r.Size, r.Mode, r.UID, r.SHA256 = fe.Path, fe.OldPath, fe.Size, fe.Mode, fe.Uid, fe.Sha256
 		r.PID, r.PPID, r.Exe, r.User = fe.Pid, fe.Ppid, fe.Exe, fe.User
+		if fe.Change != "" {
+			// FIM drift: what changed is kept in args so rules can match it.
+			r.Args = fe.Change
+			if fe.OldSha256 != "" {
+				r.Args += " old_sha256=" + fe.OldSha256
+			}
+		}
 	case *xdrv1.Event_Network:
 		ne := p.Network
 		r.Protocol, r.LocalAddr, r.LocalPort = ne.Protocol, ne.LocalAddr, ne.LocalPort

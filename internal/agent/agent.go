@@ -41,6 +41,7 @@ type Agent struct {
 
 	tamper *Tamper
 	pam    *PAM
+	prev   *Prevention
 	upd    updater
 	// ctx is cancelled by Stop, e.g. to restart into an updated binary.
 	ctx    context.Context
@@ -57,6 +58,7 @@ func New(cfg *Config, log *slog.Logger) *Agent {
 	}
 	a.tamper = newTamper(cfg, log.With("component", "tamper"), a.tamperEvent)
 	a.pam = newPAM(cfg, log.With("component", "pam"))
+	a.prev = newPrevention(a, log.With("component", "prevention"))
 	a.ctx, a.cancel = context.WithCancel(context.Background())
 	return a
 }
@@ -91,6 +93,7 @@ func (a *Agent) emit(e *xdrv1.Event) {
 	if a.scanner != nil {
 		a.scanner.Observe(e)
 	}
+	a.prev.Observe(e)
 	a.send(e)
 }
 
@@ -136,7 +139,8 @@ func (a *Agent) Run() error {
 	})
 	conn, err := grpc.NewClient(a.cfg.Server,
 		grpc.WithTransportCredentials(creds),
-		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
+		// The detection content carries the hash block list, up to 16 MiB.
+		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name), grpc.MaxCallRecvMsgSize(32<<20)),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 60 * time.Second, Timeout: 20 * time.Second}),
 	)
 	if err != nil {
@@ -190,8 +194,9 @@ func (a *Agent) Run() error {
 			a.runCollector(ctx, c)
 		}(c)
 	}
-	wg.Add(4)
+	wg.Add(5)
 	go func() { defer wg.Done(); a.scanner.Run(ctx) }()
+	go func() { defer wg.Done(); a.prev.Run(ctx) }()
 	go func() { defer wg.Done(); a.pam.Run(ctx, client) }()
 	go func() { defer wg.Done(); a.sendLoop(ctx, client) }()
 	go func() { defer wg.Done(); a.heartbeatLoop(ctx, client, host) }()
@@ -265,7 +270,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context, client xdrv1.AgentServiceClie
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		resp, err := client.Heartbeat(cctx, &xdrv1.HeartbeatRequest{
 			Host: host, Stats: a.stats(), Isolated: a.Isolated(), ContentVersion: a.scanner.Version(),
-			TamperProtected: a.tamper.Applied(),
+			TamperProtected: a.tamper.Applied(), Prevention: a.prev.State(),
 		})
 		cancel()
 		if err != nil && ctx.Err() == nil {
@@ -275,6 +280,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context, client xdrv1.AgentServiceClie
 			a.confirmUpdate()
 			a.tamper.SetPolicy(resp.Tamper)
 			a.pam.SetPolicy(resp.Pam)
+			a.prev.SetPolicy(resp.Prevention)
 		}
 		if err == nil && resp.ContentVersion != a.scanner.Version() {
 			a.updateContent(ctx, client)
@@ -300,6 +306,7 @@ func (a *Agent) updateContent(ctx context.Context, client xdrv1.AgentServiceClie
 		a.log.Warn("fetching detection content failed", "err", err)
 		return
 	}
+	a.prev.SetBlocklist(c.BlockedSha256)
 	if err := a.scanner.Update(c.Version, c.YaraRules); err != nil {
 		a.log.Error("YARA rules from the console do not compile, keeping the current ones", "err", err)
 	}

@@ -77,6 +77,12 @@ func TestBuiltinRules(t *testing.T) {
 		{"chmod normal", store.Event{Type: "process_exec", Exe: "/usr/bin/chmod", Args: "chmod 755 /tmp/sh"}, nil},
 		{"history read", store.Event{Type: "process_exec", Exe: "/usr/bin/cat", Args: "cat .bash_history"}, nil},
 		{"yara", store.Event{Type: "yara_match", Path: "/tmp/eicar.com", Args: "EICAR_Test_File"}, []string{"yara:EICAR_Test_File"}},
+		{"exec blocked, no duplicate ioc alert", store.Event{Type: "exec_blocked", Exe: "/tmp/x", SHA256: strings.Repeat("ab", 32)},
+			[]string{"xdr-exec-blocked"}},
+		{"fim shadow", store.Event{Type: "fim_change", Path: "/etc/shadow", Args: "content old_sha256=00"}, []string{"xdr-fim-critical"}},
+		{"fim binary", store.Event{Type: "fim_change", Path: "/usr/bin/ls", Args: "added"}, []string{"xdr-fim-system-binary"}},
+		{"fim other", store.Event{Type: "fim_change", Path: "/etc/hosts", Args: "permissions"}, []string{"xdr-fim-change"}},
+		{"firewall restored", store.Event{Type: "agent_tamper", Path: "firewall_restored"}, []string{"xdr-agent-tamper"}},
 	}
 	for _, c := range cases {
 		got := ruleIDs(e.Evaluate(&c.ev))
@@ -143,5 +149,24 @@ func TestParseFeed(t *testing.T) {
 	got, _ = ParseFeed("ip", strings.NewReader(in), 10)
 	if !slices.Equal(got, []string{"1.2.3.4"}) {
 		t.Errorf("ips = %v", got)
+	}
+}
+
+func TestBlockList(t *testing.T) {
+	a, b := strings.Repeat("bb", 32), strings.Repeat("aa", 32)
+	iocs := []store.IOC{
+		{Type: "sha256", Value: a, FeedID: 3}, {Type: "sha256", Value: b}, {Type: "sha256", Value: b, FeedID: 3},
+		{Type: "ip", Value: "10.0.0.1"}, {Type: "sha256", Value: "nothex"},
+	}
+	got := BlockList(iocs, 10)
+	if len(got) != 64 || got[0] != 0xaa || got[32] != 0xbb {
+		t.Fatalf("block list = %x", got)
+	}
+	// Capped lists keep manual indicators first.
+	if got := BlockList(iocs, 1); len(got) != 32 || got[0] != 0xaa {
+		t.Fatalf("capped block list = %x", got)
+	}
+	if ContentVersion("", nil) != "" || ContentVersion("", got) == ContentVersion("", nil) {
+		t.Fatal("content version must change with the block list")
 	}
 }

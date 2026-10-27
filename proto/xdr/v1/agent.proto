@@ -68,6 +68,7 @@ message HeartbeatRequest {
   string content_version = 4;
   // True while the agent's tamper protection is applied on the host.
   bool tamper_protected = 5;
+  PreventionState prevention = 6;
 }
 
 message AgentStats {
@@ -86,6 +87,61 @@ message HeartbeatResponse {
   string content_version = 3;
   TamperPolicy tamper = 4;
   PamPolicy pam = 5;
+  PreventionPolicy prevention = 6;
+}
+
+// PreventionPolicy is what the agent enforces on the host, as opposed to
+// what it only reports.
+message PreventionPolicy {
+  // Deny execution of files whose SHA-256 is a hash IOC (fanotify).
+  bool block_exec = 1;
+  FimPolicy fim = 2;
+  FirewallPolicy firewall = 3;
+}
+
+// File integrity monitoring: a baseline of hashes, owners and modes for the
+// paths, compared on file events and on a full rescan every interval.
+message FimPolicy {
+  bool enabled = 1;
+  // Files or directories (recursive).
+  repeated string paths = 2;
+  // Path prefixes, or glob patterns when they contain * ? or [.
+  repeated string exclude = 3;
+  uint32 interval_minutes = 4;
+}
+
+// Host firewall applied with nftables. Loopback, established connections and
+// the console are always allowed.
+message FirewallPolicy {
+  bool enabled = 1;
+  // Drop new inbound connections that no rule allows.
+  bool default_deny_inbound = 2;
+  repeated FirewallRule rules = 3;
+}
+
+message FirewallRule {
+  // in or out.
+  string direction = 1;
+  // allow or deny.
+  string action = 2;
+  // tcp, udp, icmp or any.
+  string protocol = 3;
+  // Comma separated ports or ranges, e.g. "22" or "80,443,8000-8100".
+  string ports = 4;
+  // Remote IP or CIDR; empty matches any address.
+  string cidr = 5;
+  string comment = 6;
+}
+
+// What the agent is enforcing right now.
+message PreventionState {
+  bool exec_blocking = 1;
+  uint32 blocked_hashes = 2;
+  bool fim_active = 3;
+  uint32 fim_files = 4;
+  bool firewall_applied = 5;
+  // Why part of the policy could not be applied, if it could not.
+  string error = 6;
 }
 
 message PamPolicy {
@@ -120,6 +176,8 @@ enum CommandType {
   COMMAND_TYPE_GRANT_ELEVATION = 9;
   // args: request_id, user. Removes the grant and ends the user's sudo sessions.
   COMMAND_TYPE_REVOKE_ELEVATION = 10;
+  // Accept the current state of the monitored files as the new FIM baseline.
+  COMMAND_TYPE_FIM_REBASELINE = 11;
 }
 
 message AgentCommand {
@@ -142,6 +200,8 @@ message DetectionContent {
   string version = 1;
   // YARA source of every enabled rule, concatenated.
   string yara_rules = 2;
+  // SHA-256 hash IOCs as concatenated 32-byte digests, for exec blocking.
+  bytes blocked_sha256 = 3;
 }
 
 message AgentBinaryRequest {
@@ -177,6 +237,11 @@ enum EventType {
   EVENT_TYPE_YARA_MATCH = 10;
   EVENT_TYPE_NET_ACCEPT = 11;
   EVENT_TYPE_AGENT_TAMPER = 12;
+  // An exec was denied by the prevention policy (process payload: pid and
+  // parent_exe are the caller, exe and sha256 the blocked file).
+  EVENT_TYPE_EXEC_BLOCKED = 13;
+  // A monitored file differs from its FIM baseline (file payload).
+  EVENT_TYPE_FIM_CHANGE = 14;
 }
 
 message Event {
@@ -219,6 +284,10 @@ message FileEvent {
   uint32 ppid = 8;
   string exe = 9;
   string user = 10;
+  // FIM only: added, removed, content, permissions or owner (comma separated).
+  string change = 11;
+  // FIM only: the baseline hash.
+  string old_sha256 = 12;
 }
 
 message NetworkEvent {

@@ -4,6 +4,8 @@ import { XdrEvent, categoryOf, formatBytes, typeLabels } from "../api";
 
 function summary(e: XdrEvent): string {
   if (e.type === "agent_tamper") return `${e.path}: ${e.args}`;
+  if (e.type === "exec_blocked") return `Blocked ${e.exe}${e.parent_exe ? ` (run by ${e.parent_exe})` : ""}`;
+  if (e.type === "fim_change") return `${e.path}: ${e.args.split(" ")[0]}`;
   switch (categoryOf(e.type)) {
     case "process":
       return e.type === "process_exit" ? `${e.exe} exited (${e.exit_code})` : e.args || e.exe;
@@ -34,13 +36,14 @@ function Detail({ e }: { e: XdrEvent }) {
   } else if (cat === "file") {
     rows.push(["Path", e.path]);
     if (e.type === "yara_match") rows.push(["YARA rules", e.args], ["SHA-256", e.sha256]);
+    if (e.type === "fim_change") rows.push(["Change", e.args]);
     if (e.old_path) rows.push(["Old path", e.old_path]);
     // Only the eBPF collector knows which process made the change.
     if (e.pid) {
       rows.push(["Process", `${e.exe || "unknown"} (pid ${e.pid}, ppid ${e.ppid})`], ["By user", e.user]);
     }
     // A deleted file can no longer be stat'ed, so it has no size or mode.
-    if (e.type !== "file_delete") {
+    if (e.type !== "file_delete" && !(e.type === "fim_change" && e.args.startsWith("removed"))) {
       rows.push(["Size", formatBytes(e.size)], ["Mode", (e.mode & 0o7777).toString(8).padStart(4, "0")], ["Owner uid", e.uid]);
     }
   } else {
