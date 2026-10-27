@@ -67,7 +67,7 @@ func TestHub(t *testing.T) {
 		t.Fatalf("activity %v %v", act, err)
 	}
 
-	s, err := h.Open("a1", "root", "admin", 80, 24)
+	s, err := h.Open("a1", "root", "admin", "", 80, 24)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestHub(t *testing.T) {
 	}
 
 	// Shells end when the agent disconnects.
-	s2, _ := h.Open("a1", "root", "admin", 80, 24)
+	s2, _ := h.Open("a1", "root", "admin", "", 80, 24)
 	cancel()
 	<-served
 	<-s2.Done()

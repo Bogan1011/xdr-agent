@@ -1,24 +1,34 @@
 # Architecture
 
-This is the target architecture from the Ironsight review (0.7 to 1.0) and
-the contracts every agent and service follows. Boxes marked *later* are not
+Ironsight is **Security Intelligence and Privileged Access for Linux and
+cloud workloads**: the same platform knows the asset, the user, the process
+tree, the exposure, the current incident and the administrative session.
+This file is the target architecture (Security Intelligence + PAM, v2.0) and
+the contracts every agent and service follows. Parts marked *later* are not
 built yet; the boundaries are.
 
+Observe → Understand → Correlate → Explain → Control access → Investigate →
+Respond → Prevent.
+
 ```
-React console ──HTTPS──▶ xdr-server (Go): API, control plane, fleet, ingest
-                                │
-              ┌─────────────────┼──────────────────┐
-              ▼                 ▼                  ▼
-         PostgreSQL     detection service     ClickHouse
-      (config, identity,  (normalize, enrich,  (telemetry,
-       policies, jobs)     detect, correlate)   hunting)
-                                ▲
-             NATS JetStream (later, when ingest needs to scale)
-                                ▲
-                    gRPC + protobuf + mTLS
-              ┌─────────────────┴──────────────────┐
-        Linux agent (Rust)                  Windows agent (Rust, later)
-   eBPF CO-RE, fanotify, netlink, procfs      ETW, WFP, minifilter
+            Unified console (React + TypeScript)
+   incidents · attack graph · inventory · privileged access · audit
+                              │ HTTPS, users + roles + MFA
+                              ▼
+ ┌──────────────────────── xdr-server (Go) ─────────────────────────┐
+ │ Control plane: identity & access (iam), fleet, policies, audit    │
+ │ Security Intelligence: pipeline, detection, storyline, risk       │
+ │ PAM (internal/server/pam): access policies, approvals, sessions   │
+ └──────┬──────────────────┬───────────────────────┬────────────────┘
+        ▼                  ▼                       ▼
+   PostgreSQL          ClickHouse          Object storage (later)
+ tenants, users,     telemetry, session    recordings, evidence
+ roles, assets,      events, hunting       (Postgres until then)
+ policies, approvals
+        ▲
+        │ gRPC + protobuf + mTLS (persistent Live stream, outbound from agent)
+ Rust security agent: Linux now (eBPF CO-RE, fanotify, netlink, procfs),
+ Windows later (ETW, WFP, minifilter). SQLite offline queue and state.
 ```
 
 What stays: Go for every backend service, PostgreSQL, ClickHouse, gRPC/mTLS,
@@ -26,6 +36,25 @@ eBPF CO-RE and the React console. What changes: the endpoint agent moves to
 Rust with a platform-independent core and per-OS adapters. Since 0.10.0 the
 Rust agent is the only agent; the Go agent was removed before parity (see
 "Migration from the Go agent").
+
+NATS JetStream is added between ingest and detection when scale needs it.
+
+## Modules
+
+| Module | Responsibility | Where it lives now |
+|---|---|---|
+| Visibility | Endpoint, workload, identity, network, container and inventory telemetry. | `agent-rs/`, `proto/xdr/v1`, `internal/server/pipeline` (normalize, store) |
+| Detection | Rules, behaviour analytics, IOC/YARA, correlation, detection as code. | `internal/server/detect`, `xdr-detect` container |
+| Security Intelligence | Process graph, asset graph, attack story, risk, explainability, exposure, blast radius. | `internal/server/storyline`, `pipeline/enrich`, `pam.Risk` (baseline) |
+| PAM | Identity, RBAC, JIT, approvals, SSH/RDP/browser access, sessions, credentials, audit. | `internal/server/iam`, `internal/server/pam`, `store/iam.go`, `api/iam.go`, `api/pam.go`, `live` (shell transport) |
+| Investigation | Hunting, timeline, graph exploration, evidence packages, attack replay. | console Threat hunting, Workbench, Storyline, session timeline |
+| Response | Controlled administrative actions and automated remediation. | commands (`detect.Service.QueueCommand`), Live push |
+| Protection | Malware, application control, isolation, firewall, IPS, enforcement. | endpoint policies (`internal/policy`), agent prevention modules |
+
+PAM is a separate module with its own package boundary: it reads identity,
+asset and incident context but owns its own decisions, and nothing in
+Detection or Protection can open a session. Protection evolves on its own
+too.
 
 ## Canonical SecurityEvent (schema_version 1)
 
@@ -193,6 +222,91 @@ without the hello (old Go agents) get commands
 with their heartbeat as before. Results always come back through
 `ReportCommandResult`, and the agent ignores a command ID it already ran.
 
+## Identity and access model (P0)
+
+Entities are independent of telemetry and referenced by stable IDs.
+
+| Entity | Table | Key fields |
+|---|---|---|
+| Tenant | `tenants` | id, name |
+| User | `users` | id, tenant_id, username, role_id, password (PBKDF2-SHA256), mfa_secret/mfa_enabled, disabled, builtin |
+| Role | `roles` | tenant_id + id, permissions[], builtin |
+| Asset group | `asset_groups`, `asset_group_members` | name, criticality, environment, all_assets, agent ids |
+| Access policy | `access_policies` | subject roles/users, asset groups, access types, accounts, approval count, MFA, ticket, max minutes, UTC hours, incident mode, priority, effect |
+| Access request | `pam_requests` | kind (`shell`, `jit_sudo`), requester, account, reason, ticket, policy, approvals_required, incident, emergency, status, expiry |
+| Approval | `approvals` | request, approver, decision, note, emergency (one per approver) |
+| Privileged session | `access_sessions` | id, tenant, user, asset, source IP and user agent, protocol, account, auth method, request, policy, ticket, recording, start/end, risk score and reasons |
+| Recording | `pam_sessions` | session output (Postgres for now, object storage later) |
+| Audit entry | `audit_log` | actor, action, target, outcome, remote, detail, prev_hash, hash |
+| Team, credential, service account, ticket | *later (P2)* | |
+
+**Console sign-in.** Users sign in with username and password, plus a TOTP
+code when they turned MFA on. `XDR_ADMIN_USER` / `XDR_ADMIN_PASSWORD` is the
+built-in break-glass administrator: created on first start, its password and
+admin role reset on every start. TOTP (RFC 6238) is the MFA integration
+point; WebAuthn or an IdP plugs in at the same place.
+
+**Permissions.** Built-in roles: Administrator (`*`), SOC analyst, Server
+operator, Auditor; custom roles pick from the permission list in
+`internal/server/iam`. Every API route needs one permission
+(`iam.RoutePermission`): unlisted GET routes need `view`, every other
+unlisted route is admin-only, so a new route is safe by default.
+
+**Audit.** Every change, sign-in, denied request, shell, maintenance-token
+reveal and recording view is appended to `audit_log`. Each entry stores the
+hash of the one before (`sha256(prev_hash | at | actor | … | detail)`), and
+`GET /api/v1/audit/verify` walks the chain to prove nothing was edited or
+removed.
+
+**Event ↔ identity.** Telemetry rows keep their own fields; they point at
+identity through stable IDs: an `access_sessions.id` is the console shell
+session ID the agent receives in `ShellOpen.session_id`; agents that pass
+it to the processes they start tag their events with it (`console_session`,
+added by the Linux telemetry work). Until every agent sends it, the session timeline matches the shells the agent started
+for that session's window.
+
+## Privileged access (P1)
+
+A privileged session is never a bare "remote shell button". Each one has a
+tenant, an authenticated user, a target asset, a policy decision, an expiry,
+an audit trail and a recording.
+
+```
+Admin (console, password + optional MFA)
+  │  POST /api/v1/pam/access {agent, kind, account, reason, ticket, minutes, mfa_code}
+  ▼
+Access-policy engine (pam.Decide)
+  first enabled policy by priority matching role/user, asset group,
+  access type, account and UTC hours; deny wins if it matches first;
+  an open high/critical alert can add approval or block (incident mode)
+  │ allowed, needs approval → pending  │ allowed, no approval → approved
+  ▼                                    ▼
+Approvals (N distinct approvers, never the requester; admins can
+self-approve as emergency access with a note, which raises risk)
+  ▼
+Grant until expiry: shell usable (GET /agents/{id}/shell?request=)
+or JIT sudo sent to the agent (grant_elevation)
+  ▼
+Session broker (live.Hub over the agent's outbound Live stream)
+  records output, closes the shell at expiry or revoke
+  ▼
+access_sessions row: scored at the end (pam.Risk), linked to the
+recording, the alerts raised during it and the processes it started
+```
+
+Sudo asked for on the host (`xdr-agent elevate`) goes through the same
+engine with the pseudo-role `host`; its recordings become `access_sessions`
+rows with protocol `sudo`.
+
+Default policies on first start: administrators get shells and sudo on every
+server without approval (recorded); analysts and operators need one approval,
+up to 2 hours, and are blocked while the server has an open high or critical
+alert; host sudo requests need one approval, up to 8 hours.
+
+The session data path (agent ↔ hub ↔ browser) is separate from the control
+plane decisions, no credentials are stored or handed to the browser, and
+servers need no inbound management port.
+
 ## Data model rules
 
 - **tenant_id everywhere.** Postgres: agents, enrollment tokens, deploy jobs,
@@ -212,18 +326,38 @@ with their heartbeat as before. Results always come back through
   remote addresses and process GUIDs.
 - **Large artifacts go to object storage later.** PAM recordings stay in
   Postgres for now and move to S3/MinIO with metadata in ClickHouse.
+- **Identity and access tables are tenant-scoped.** Users, roles, asset
+  groups, access policies, approvals, privileged sessions and the audit log
+  carry tenant_id; API handlers for them filter by the signed-in user's
+  tenant.
 
-## Roadmap (Phase 1 and 2)
+## Roadmap
+
+Platform (Phase 1 and 2, done or in progress):
 
 1. Canonical SecurityEvent v1, process_guid, priority, tenant_id and
    versioning (0.8.0).
-2. Rust agent workspace: `xdr-core` (config, identity, event bus, SQLite queue,
-   policy cache, gRPC/mTLS transport) and `xdr-linux` (collectors and
-   response). Ships as an opt-in second binary.
-3. Detection service boundary: normalize, enrich, detect, correlate, runnable
-   inside xdr-server or as its own container (0.9.0).
+2. Rust agent workspace: `xdr-core` and `xdr-linux`.
+3. Detection service boundary: normalize, enrich, detect, correlate (0.9.0).
 4. Process tree model and storyline view keyed by `process_guid` (0.9.0).
-5. Real-time command stream over the existing bidirectional Live stream (0.9.0).
-6. Rust feature migration to parity, then the Rust agent becomes the default.
+5. Real-time command stream over the Live stream (0.9.0).
+6. Rust feature parity; the Rust agent is the only agent from 0.10.0.
+
+Privileged access:
+
+- **P0 platform foundation** (done): tenant-aware identity, users, roles,
+  permissions, asset groups, session entity, audit model, MFA integration
+  point, approval model, access-policy engine, event ↔ identity references.
+- **P1 core PAM** (done, Linux): browser terminal through the agent, JIT
+  sudo, approval workflow, session metadata, session recording, command
+  audit via the session timeline, admin activity in the audit log. Direct SSH
+  through a gateway is next.
+- **P2 enterprise PAM** (later): RDP gateway, credential vault and rotation,
+  SSH keys and service accounts, emergency access policies, ticket
+  integration, advanced conditions (device trust, source network), session
+  search and replay.
+- **P3 deep integration** (later): risk-aware access, incident-driven
+  restrictions beyond the incident mode, suspicious-session detection rules,
+  automatic response, SOAR.
 
 Not yet: NATS JetStream, Kubernetes, Windows.

@@ -1,7 +1,9 @@
-import { FormEvent, Fragment, useState } from "react";
+import { Fragment, useState } from "react";
 import { Link } from "react-router-dom";
-import { Elevation, ElevationStatus, Inventory, PamSession, api, formatBytes, timeAgo } from "../api";
+import { AccessSession, Elevation, ElevationStatus, Inventory, PamSession, api, can, formatBytes, timeAgo } from "../api";
 import { usePoll } from "../hooks";
+import { useMe } from "../me";
+import { AccessForm } from "./RemoteAccess";
 
 const statusClass: Record<ElevationStatus, string> = {
   pending: "status-warn",
@@ -11,6 +13,7 @@ const statusClass: Record<ElevationStatus, string> = {
   expired: "muted",
   revoked: "muted",
   failed: "status-critical",
+  cancelled: "muted",
 };
 
 const durations = [15, 30, 60, 120, 240, 480];
@@ -23,6 +26,8 @@ export default function PAM() {
   const requests = usePoll(() => api.elevations(), 5000);
   const accounts = usePoll(api.privilegedAccounts, 30000);
   const sessions = usePoll(() => api.pamSessions(), 15000);
+  const privileged = usePoll(() => api.accessSessions(), 15000);
+  const me = useMe();
 
   return (
     <>
@@ -30,20 +35,27 @@ export default function PAM() {
         <div>
           <h1>Privileged access</h1>
           <p className="muted small">
-            Just-in-time sudo, recorded root sessions and the accounts that can act as root on each host.
+            Every shell and sudo grant is an access request decided by the <Link to="/admin/access">access policies</Link>:
+            who, which servers, approval, MFA and how long. Sessions are recorded and scored.
           </p>
         </div>
       </header>
       <section className="card">
-        <h2>Elevation requests</h2>
+        <h2>Access requests</h2>
         <p className="muted small">
-          Users ask on the host with <code>xdr-agent elevate -reason "…" -duration 30m</code>. Approved sudo is removed when it
-          expires or is revoked, and running sudo sessions are ended.
+          Shell requests come from Remote access; sudo from the form below or on the host with{" "}
+          <code>xdr-agent elevate -reason "…" -duration 30m</code>. Grants end when they expire or are revoked, and open
+          shells and sudo sessions are closed.
         </p>
         {requests.error && <div className="error">{requests.error}</div>}
         {requests.data && <RequestTable requests={requests.data} onChange={() => { requests.refresh(); sessions.refresh(); }} />}
       </section>
-      <GrantForm onDone={requests.refresh} />
+      {can(me, "access.request") && <GrantForm onDone={requests.refresh} />}
+      <section className="card">
+        <h2>Privileged sessions</h2>
+        <p className="muted small">Who connected where, under which approval, and how risky it looked.</p>
+        {privileged.data && <PrivilegedSessions sessions={privileged.data} />}
+      </section>
       <section className="card">
         <h2>Privileged accounts</h2>
         {accounts.data && <AccountTable inventory={accounts.data} />}
@@ -61,6 +73,7 @@ export default function PAM() {
 }
 
 function RequestTable({ requests, onChange }: { requests: Elevation[]; onChange: () => void }) {
+  const me = useMe();
   const [length, setLength] = useState<Record<string, number>>({});
   const [error, setError] = useState("");
   if (requests.length === 0) return <div className="empty">No requests yet.</div>;
@@ -83,10 +96,12 @@ function RequestTable({ requests, onChange }: { requests: Elevation[]; onChange:
           <thead>
             <tr>
               <th>Requested</th>
+              <th>Access</th>
               <th>Host</th>
-              <th>User</th>
+              <th>Account</th>
               <th>Reason</th>
               <th>Length</th>
+              <th>Approvals</th>
               <th>Status</th>
               <th></th>
             </tr>
@@ -98,33 +113,62 @@ function RequestTable({ requests, onChange }: { requests: Elevation[]; onChange:
               return (
                 <tr key={r.id}>
                   <td className="nowrap" title={new Date(r.created_at).toLocaleString()}>{timeAgo(r.created_at)}</td>
+                  <td className="nowrap">{r.kind === "shell" ? "Shell" : "Sudo"}</td>
                   <td><Link to={`/endpoints/${r.agent_id}`}>{r.hostname}</Link></td>
                   <td className="mono">{r.username}</td>
                   <td>
-                    {r.reason}
-                    {r.requested_by !== r.username && <div className="muted small">granted by {r.requested_by}</div>}
+                    {r.reason || <span className="muted">—</span>}
+                    {r.ticket && <div className="small mono">{r.ticket}</div>}
+                    {r.requested_by !== r.username && <div className="muted small">by {r.requested_by}</div>}
                     {r.note && <div className="muted small">{r.note}</div>}
+                    {r.incident && <div className="status status-critical small">open {r.incident} alert</div>}
                   </td>
                   <td className="nowrap">{minutes(asked)}</td>
+                  <td className="nowrap small">
+                    {(r.approvals ?? []).filter((a) => a.decision === "approve").length}/{r.approvals_required}
+                    {r.policy_name && <div className="muted">{r.policy_name}</div>}
+                    {(r.approvals ?? []).map((a) => (
+                      <div key={a.approver} className="muted">
+                        {a.decision === "approve" ? "✓" : "✗"} {a.approver}{a.emergency ? " (emergency)" : ""}
+                      </div>
+                    ))}
+                  </td>
                   <td className="nowrap">
                     <span className={`status ${statusClass[r.status]}`}>{r.status}</span>
-                    {(r.status === "active" || r.status === "approved") && (
+                    {(r.status === "active" || r.status === "approved") && can(me, "access.approve") && (
                       <div className="muted small">until {new Date(r.expires_at).toLocaleTimeString()}</div>
                     )}
                     {r.decided_by && r.status !== "pending" && <div className="muted small">by {r.decided_by}</div>}
                   </td>
                   <td className="nowrap">
-                    {r.status === "pending" && (
+                    {r.status === "pending" && r.requester_id === me?.id && (
+                      <div className="actions">
+                        <button onClick={() => act(() => api.cancelElevation(r.id))}>Cancel</button>
+                        {can(me, "*") && (
+                          <button
+                            className="danger"
+                            title="Break-glass: approve your own request. Logged and raises the session's risk."
+                            onClick={() => {
+                              const note = prompt("Emergency access: why can't this wait for another approver?");
+                              if (note) act(() => api.approveElevation(r.id, pick, note, true).then(() => undefined));
+                            }}
+                          >
+                            Emergency
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {r.status === "pending" && r.requester_id !== me?.id && can(me, "access.approve") && (
                       <div className="actions">
                         <select value={pick} onChange={(e) => setLength({ ...length, [r.id]: Number(e.target.value) })}>
                           {[...new Set([asked, ...durations])].sort((a, b) => a - b).map((m) => (
                             <option key={m} value={m}>{minutes(m)}</option>
                           ))}
                         </select>
-                        <button className="primary" onClick={() => act(() => api.approveElevation(r.id, pick))}>Approve</button>
+                        <button className="primary" onClick={() => act(() => api.approveElevation(r.id, pick).then(() => undefined))}>Approve</button>
                         <button
                           onClick={() => {
-                            const note = prompt(`Deny sudo for ${r.username} on ${r.hostname}? Optional note for the user:`);
+                            const note = prompt(`Deny access for ${r.username} on ${r.hostname}? Optional note for the requester:`);
                             if (note !== null) act(() => api.denyElevation(r.id, note));
                           }}
                         >
@@ -136,7 +180,7 @@ function RequestTable({ requests, onChange }: { requests: Elevation[]; onChange:
                       <button
                         className="danger"
                         onClick={() => {
-                          if (confirm(`Revoke sudo for ${r.username} on ${r.hostname} now? Their running sudo sessions are ended.`))
+                          if (confirm(`Revoke access for ${r.username} on ${r.hostname} now? Open shells and sudo sessions are ended.`))
                             act(() => api.revokeElevation(r.id));
                         }}
                       >
@@ -157,47 +201,70 @@ function RequestTable({ requests, onChange }: { requests: Elevation[]; onChange:
 function GrantForm({ onDone }: { onDone: () => void }) {
   const agents = usePoll(api.agents, 60000);
   const [agent, setAgent] = useState("");
-  const [user, setUser] = useState("");
-  const [len, setLen] = useState(60);
-  const [reason, setReason] = useState("");
   const [msg, setMsg] = useState("");
-  const [error, setError] = useState("");
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setError("");
-    setMsg("");
-    try {
-      await api.grantElevation(agent, user, len, reason);
-      setMsg(`Sudo sent to ${user}; it is active once the agent checks in.`);
-      setUser("");
-      setReason("");
-      onDone();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
   return (
-    <section className="card">
-      <h2>Grant sudo</h2>
-      <form className="filters" onSubmit={submit}>
-        <select value={agent} onChange={(e) => setAgent(e.target.value)} required>
-          <option value="">Host…</option>
-          {(agents.data ?? []).filter((a) => !a.revoked).map((a) => (
-            <option key={a.id} value={a.id}>{a.hostname}{a.online ? "" : " (offline)"}</option>
-          ))}
-        </select>
-        <input placeholder="Local user" value={user} onChange={(e) => setUser(e.target.value)} required className="mono" />
-        <select value={len} onChange={(e) => setLen(Number(e.target.value))}>
-          {durations.map((m) => <option key={m} value={m}>{minutes(m)}</option>)}
-        </select>
-        <input className="grow" placeholder="Reason, e.g. ticket OPS-123" value={reason} onChange={(e) => setReason(e.target.value)} required />
-        <button className="primary">Grant</button>
-      </form>
-      {error && <div className="error">{error}</div>}
-      {msg && <div className="notice">{msg}</div>}
-    </section>
+    <>
+      <section className="card">
+        <div className="card-head">
+          <h2>Sudo for a local account</h2>
+          <select value={agent} onChange={(e) => { setAgent(e.target.value); setMsg(""); }} required aria-label="Host">
+            <option value="">Pick a host…</option>
+            {(agents.data ?? []).filter((a) => !a.revoked).map((a) => (
+              <option key={a.id} value={a.id}>{a.hostname}{a.online ? "" : " (offline)"}</option>
+            ))}
+          </select>
+        </div>
+        {msg && <div className="notice">{msg}</div>}
+        {!agent && <div className="muted small">Pick a host to see what its access policy needs.</div>}
+      </section>
+      {agent && (
+        <AccessForm
+          key={agent}
+          agentId={agent}
+          kind="jit_sudo"
+          onCreated={(r) => {
+            setMsg(r.status === "pending" ? `Request sent; it needs ${r.approvals_required} approval(s).` : `Sudo sent to ${r.username}; it is active once the agent checks in.`);
+            onDone();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function riskClass(n: number) {
+  return n >= 50 ? "status-critical" : n >= 20 ? "status-warn" : "status-good";
+}
+
+function PrivilegedSessions({ sessions }: { sessions: AccessSession[] }) {
+  if (sessions.length === 0) return <div className="empty">No privileged sessions yet.</div>;
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Started</th><th>Who</th><th>Host</th><th>How</th><th>Approval</th><th>Length</th><th>Risk</th></tr>
+        </thead>
+        <tbody>
+          {sessions.map((s) => {
+            const end = s.ended_at && new Date(s.ended_at).getTime() > 0 ? new Date(s.ended_at).getTime() : 0;
+            return (
+              <tr key={s.id}>
+                <td className="nowrap"><Link to={`/pam/sessions/${encodeURIComponent(s.id)}`}>{timeAgo(s.started_at)}</Link></td>
+                <td>{s.username}<div className="muted small mono">{s.source_ip}</div></td>
+                <td><Link to={`/endpoints/${s.agent_id}`}>{s.hostname}</Link></td>
+                <td className="small">
+                  {s.protocol === "browser_shell" ? "Browser shell" : "sudo"} as <code>{s.account || "root"}</code>
+                  <div className="muted">{s.auth_method}</div>
+                </td>
+                <td className="small">{s.policy_name || (s.request_id ? s.request_id.slice(0, 8) : <span className="muted">standing</span>)}</td>
+                <td className="nowrap">{end ? `${Math.max(1, Math.round((end - new Date(s.started_at).getTime()) / 60000))} min` : <span className="status status-good">open</span>}</td>
+                <td className="nowrap" title={s.risk_reasons.join("\n")}><span className={`status ${riskClass(s.risk_score)}`}>{s.risk_score}</span></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
