@@ -18,8 +18,12 @@ ENV CARGO_HTTP_MULTIPLEXING=false CARGO_HTTP_TIMEOUT=300 CARGO_NET_RETRY=10
 WORKDIR /src
 COPY agent-rs/ ./
 ARG VERSION=dev
-RUN XDR_VERSION=${VERSION} cargo build --release --locked -p xdr-agent && \
-    mkdir -p /out/downloads && cp target/release/xdr-agent /out/downloads/xdr-agent-linux-amd64 && \
+# A binary dropped in agent-rs/prebuilt/ (for hosts that can't reach
+# crates.io) is used as is; otherwise the agent is compiled here.
+RUN mkdir -p /out/downloads && \
+    if [ -f prebuilt/xdr-agent-linux-amd64 ]; then cp prebuilt/xdr-agent-linux-amd64 /out/downloads/; \
+    else XDR_VERSION=${VERSION} cargo build --release --locked -p xdr-agent && \
+      cp target/release/xdr-agent /out/downloads/xdr-agent-linux-amd64; fi && \
     cd /out/downloads && sha256sum xdr-agent-linux-* > SHA256SUMS && echo "${VERSION}" > VERSION
 
 FROM golang:1.26-alpine AS go
