@@ -464,13 +464,22 @@ pub struct Event {
         ::prost::alloc::string::String,
         ::prost::alloc::string::String,
     >,
-    #[prost(oneof = "event::Payload", tags = "10, 11, 12, 13, 14, 15")]
+    /// The container the actor runs in; empty on the host.
+    #[prost(message, optional, tag = "21")]
+    pub container: ::core::option::Option<ContainerContext>,
+    /// The agent collector that produced the event, e.g. "process" or "dns".
+    #[prost(string, tag = "22")]
+    pub collector: ::prost::alloc::string::String,
+    #[prost(
+        oneof = "event::Payload",
+        tags = "10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 23, 24"
+    )]
     pub payload: ::core::option::Option<event::Payload>,
 }
 /// Nested message and enum types in `Event`.
 pub mod event {
     #[allow(clippy::all)]
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Payload {
         #[prost(message, tag = "10")]
         Process(super::ProcessEvent),
@@ -484,6 +493,18 @@ pub mod event {
         Tamper(super::TamperEvent),
         #[prost(message, tag = "15")]
         Policy(super::PolicyEvent),
+        #[prost(message, tag = "16")]
+        Dns(super::DnsEvent),
+        #[prost(message, tag = "17")]
+        Auth(super::AuthEvent),
+        #[prost(message, tag = "18")]
+        Persistence(super::PersistenceEvent),
+        #[prost(message, tag = "19")]
+        Memory(super::MemoryEvent),
+        #[prost(message, tag = "23")]
+        Kernel(super::KernelEvent),
+        #[prost(message, tag = "24")]
+        Inventory(super::InventoryEvent),
     }
 }
 /// ProcessContext identifies a process by process_guid, which stays unique
@@ -520,6 +541,56 @@ pub struct ProcessContext {
     pub parent_user: ::prost::alloc::string::String,
     #[prost(string, tag = "14")]
     pub parent_sha256: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "15")]
+    pub gid: u32,
+    #[prost(string, tag = "16")]
+    pub group: ::prost::alloc::string::String,
+    #[prost(string, tag = "17")]
+    pub cwd: ::prost::alloc::string::String,
+    /// Controlling terminal, e.g. "pts/0"; empty for daemons.
+    #[prost(string, tag = "18")]
+    pub tty: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "19")]
+    pub session_id: u32,
+    /// Effective uid; differs from uid for setuid programs.
+    #[prost(uint32, tag = "20")]
+    pub euid: u32,
+    /// The uid of the original login, kept across sudo and su (audit loginuid).
+    /// 4294967295 when unset, e.g. for services.
+    #[prost(uint32, tag = "21")]
+    pub login_uid: u32,
+    #[prost(string, tag = "22")]
+    pub md5: ::prost::alloc::string::String,
+    #[prost(string, tag = "23")]
+    pub sha1: ::prost::alloc::string::String,
+    /// Namespace inode numbers; they differ from the host's inside containers.
+    #[prost(uint64, tag = "24")]
+    pub pid_namespace: u64,
+    #[prost(uint64, tag = "25")]
+    pub mnt_namespace: u64,
+    #[prost(uint64, tag = "26")]
+    pub net_namespace: u64,
+}
+#[allow(clippy::all)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ContainerContext {
+    #[prost(string, tag = "1")]
+    pub container_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub image: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub image_id: ::prost::alloc::string::String,
+    /// docker, containerd, cri-o or podman.
+    #[prost(string, tag = "5")]
+    pub runtime: ::prost::alloc::string::String,
+    #[prost(string, tag = "6")]
+    pub pod_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "7")]
+    pub pod_namespace: ::prost::alloc::string::String,
+    #[prost(string, tag = "8")]
+    pub pod_uid: ::prost::alloc::string::String,
 }
 #[allow(clippy::all)]
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -546,6 +617,31 @@ pub struct ProcessEvent {
     pub parent_exe: ::prost::alloc::string::String,
     #[prost(int32, tag = "11")]
     pub exit_code: i32,
+    #[prost(uint32, tag = "12")]
+    pub euid: u32,
+    #[prost(string, tag = "13")]
+    pub group: ::prost::alloc::string::String,
+    #[prost(string, tag = "14")]
+    pub tty: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "15")]
+    pub session_id: u32,
+    #[prost(uint32, tag = "16")]
+    pub login_uid: u32,
+    /// Effective capabilities (CapEff), hex, when not the full root set or zero.
+    #[prost(string, tag = "17")]
+    pub capabilities: ::prost::alloc::string::String,
+    #[prost(string, tag = "18")]
+    pub md5: ::prost::alloc::string::String,
+    #[prost(string, tag = "19")]
+    pub sha1: ::prost::alloc::string::String,
+    /// Owner and mode of the executable file.
+    #[prost(uint32, tag = "20")]
+    pub exe_uid: u32,
+    #[prost(uint32, tag = "21")]
+    pub exe_mode: u32,
+    /// Exit only: how long the process ran.
+    #[prost(uint64, tag = "22")]
+    pub duration_ms: u64,
 }
 #[allow(clippy::all)]
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -578,6 +674,24 @@ pub struct FileEvent {
     /// FIM only: the baseline hash.
     #[prost(string, tag = "12")]
     pub old_sha256: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "13")]
+    pub inode: u64,
+    #[prost(uint64, tag = "14")]
+    pub device: u64,
+    #[prost(uint32, tag = "15")]
+    pub gid: u32,
+    /// Owner name of the file.
+    #[prost(string, tag = "16")]
+    pub owner: ::prost::alloc::string::String,
+    /// File system type and mount point holding the file.
+    #[prost(string, tag = "17")]
+    pub filesystem: ::prost::alloc::string::String,
+    #[prost(string, tag = "18")]
+    pub mount_point: ::prost::alloc::string::String,
+    #[prost(string, tag = "19")]
+    pub md5: ::prost::alloc::string::String,
+    #[prost(string, tag = "20")]
+    pub sha1: ::prost::alloc::string::String,
 }
 #[allow(clippy::all)]
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -598,6 +712,209 @@ pub struct NetworkEvent {
     pub exe: ::prost::alloc::string::String,
     #[prost(uint32, tag = "8")]
     pub uid: u32,
+    /// outbound, inbound or listen.
+    #[prost(string, tag = "9")]
+    pub direction: ::prost::alloc::string::String,
+    #[prost(string, tag = "10")]
+    pub user: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "11")]
+    pub net_namespace: u64,
+}
+#[allow(clippy::all)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DnsAnswer {
+    /// A, AAAA, CNAME, ...
+    #[prost(string, tag = "1")]
+    pub r#type: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub data: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "3")]
+    pub ttl: u32,
+}
+#[allow(clippy::all)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DnsEvent {
+    #[prost(string, tag = "1")]
+    pub query: ::prost::alloc::string::String,
+    /// A, AAAA, MX, TXT, ...
+    #[prost(string, tag = "2")]
+    pub query_type: ::prost::alloc::string::String,
+    /// NOERROR, NXDOMAIN, SERVFAIL...; empty when no answer was seen.
+    #[prost(string, tag = "3")]
+    pub response_code: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "4")]
+    pub answers: ::prost::alloc::vec::Vec<DnsAnswer>,
+    #[prost(string, tag = "5")]
+    pub server: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "6")]
+    pub server_port: u32,
+    #[prost(uint32, tag = "7")]
+    pub pid: u32,
+    #[prost(string, tag = "8")]
+    pub exe: ::prost::alloc::string::String,
+    /// udp or tcp.
+    #[prost(string, tag = "9")]
+    pub protocol: ::prost::alloc::string::String,
+}
+#[allow(clippy::all)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AuthEvent {
+    /// login, logout, failed, sudo, su, user_created, user_deleted,
+    /// user_modified, group_created, group_deleted, group_modified, password_changed.
+    #[prost(string, tag = "1")]
+    pub action: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "3")]
+    pub uid: u32,
+    #[prost(string, tag = "4")]
+    pub source_ip: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "5")]
+    pub source_port: u32,
+    #[prost(string, tag = "6")]
+    pub tty: ::prost::alloc::string::String,
+    /// password, publickey, keyboard-interactive, ...
+    #[prost(string, tag = "7")]
+    pub method: ::prost::alloc::string::String,
+    #[prost(bool, tag = "8")]
+    pub success: bool,
+    #[prost(string, tag = "9")]
+    pub failure_reason: ::prost::alloc::string::String,
+    /// sudo and su: the account switched to. Account changes: the account changed.
+    #[prost(string, tag = "10")]
+    pub target_user: ::prost::alloc::string::String,
+    /// sudo: the command run.
+    #[prost(string, tag = "11")]
+    pub command: ::prost::alloc::string::String,
+    /// The program that reported it: sshd, sudo, su, login, useradd, ...
+    #[prost(string, tag = "12")]
+    pub service: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "13")]
+    pub pid: u32,
+    #[prost(string, tag = "14")]
+    pub detail: ::prost::alloc::string::String,
+    #[prost(string, tag = "15")]
+    pub session_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::all)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PersistenceEvent {
+    /// systemd_service, systemd_timer, cron, init_script, ssh_authorized_keys,
+    /// ssh_config, shell_profile, ld_preload, ld_library_path, udev_rule,
+    /// kernel_module_config, sysctl_config, sudoers, passwd, rc_local, motd, at_job.
+    #[prost(string, tag = "1")]
+    pub persistence_type: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub path: ::prost::alloc::string::String,
+    /// created, modified or deleted.
+    #[prost(string, tag = "3")]
+    pub operation: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub sha256: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub old_sha256: ::prost::alloc::string::String,
+    /// Lines removed and added (text files, truncated).
+    #[prost(string, tag = "6")]
+    pub old_value: ::prost::alloc::string::String,
+    #[prost(string, tag = "7")]
+    pub new_value: ::prost::alloc::string::String,
+    /// The process that made the change, when known.
+    #[prost(uint32, tag = "8")]
+    pub pid: u32,
+    #[prost(string, tag = "9")]
+    pub exe: ::prost::alloc::string::String,
+    #[prost(string, tag = "10")]
+    pub user: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "11")]
+    pub uid: u32,
+}
+#[allow(clippy::all)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct MemoryEvent {
+    /// ptrace_attach, proc_mem_write, rwx_mapping, memfd_exec, deleted_exe,
+    /// ld_preload_env, preload_library.
+    #[prost(string, tag = "1")]
+    pub operation: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "2")]
+    pub source_pid: u32,
+    #[prost(string, tag = "3")]
+    pub source_process_guid: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub source_exe: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "5")]
+    pub target_pid: u32,
+    #[prost(string, tag = "6")]
+    pub target_process_guid: ::prost::alloc::string::String,
+    #[prost(string, tag = "7")]
+    pub target_exe: ::prost::alloc::string::String,
+    #[prost(string, tag = "8")]
+    pub source_user: ::prost::alloc::string::String,
+    #[prost(string, tag = "9")]
+    pub target_user: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "10")]
+    pub address: u64,
+    #[prost(uint64, tag = "11")]
+    pub size: u64,
+    #[prost(string, tag = "12")]
+    pub old_protection: ::prost::alloc::string::String,
+    #[prost(string, tag = "13")]
+    pub new_protection: ::prost::alloc::string::String,
+    #[prost(bool, tag = "14")]
+    pub rwx: bool,
+    #[prost(bool, tag = "15")]
+    pub injection: bool,
+    #[prost(string, tag = "16")]
+    pub detail: ::prost::alloc::string::String,
+}
+#[allow(clippy::all)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct KernelEvent {
+    /// module_loaded, module_unloaded, sysctl_changed, mounted, unmounted,
+    /// kernel_tainted.
+    #[prost(string, tag = "1")]
+    pub action: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub old_value: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub new_value: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub detail: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "6")]
+    pub pid: u32,
+    #[prost(string, tag = "7")]
+    pub exe: ::prost::alloc::string::String,
+}
+#[allow(clippy::all)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InventoryItem {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub version: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub detail: ::prost::alloc::string::String,
+}
+#[allow(clippy::all)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct InventoryEvent {
+    /// system, packages, interfaces or mounts.
+    #[prost(string, tag = "1")]
+    pub kind: ::prost::alloc::string::String,
+    /// snapshot (full list) or changed (only added and removed items).
+    #[prost(string, tag = "2")]
+    pub action: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "3")]
+    pub added: ::prost::alloc::vec::Vec<InventoryItem>,
+    #[prost(message, repeated, tag = "4")]
+    pub removed: ::prost::alloc::vec::Vec<InventoryItem>,
+    /// kind system: uptime, boot_time, cpu_cores, memory_bytes, distribution...
+    #[prost(map = "string, string", tag = "5")]
+    pub attributes: ::std::collections::HashMap<
+        ::prost::alloc::string::String,
+        ::prost::alloc::string::String,
+    >,
 }
 #[allow(clippy::all)]
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -1032,6 +1349,35 @@ pub enum EventType {
     Intrusion = 16,
     DeviceControl = 17,
     AppControl = 18,
+    /// Telemetry spec families (docs/telemetry.md).
+    /// A DNS lookup and, when seen, its answer (dns payload).
+    DnsQuery = 19,
+    /// Authentication (auth payload): sessions, failures, privilege changes and
+    /// local account changes.
+    AuthLogin = 20,
+    AuthLogout = 21,
+    AuthFailed = 22,
+    Sudo = 23,
+    Su = 24,
+    AccountChange = 25,
+    /// A persistence location changed (persistence payload).
+    Persistence = 26,
+    /// One process reads or writes another's memory, e.g. ptrace (memory payload).
+    ProcessAccess = 27,
+    /// Writable and executable memory appeared in a process (memory payload).
+    MemoryProtect = 28,
+    /// Code injection signs: fileless exec, preload, deleted image (memory payload).
+    ProcessInjection = 29,
+    /// Kernel and low-level changes (kernel payload).
+    KernelModule = 30,
+    KernelChange = 31,
+    /// A container's first and last process (container context, no payload).
+    ContainerStart = 32,
+    ContainerStop = 33,
+    /// Host inventory, sent at start and when it changes (inventory payload).
+    Inventory = 34,
+    /// A sensitive file (credentials, keys) was opened (file payload).
+    FileOpen = 35,
 }
 impl EventType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1059,6 +1405,23 @@ impl EventType {
             Self::Intrusion => "EVENT_TYPE_INTRUSION",
             Self::DeviceControl => "EVENT_TYPE_DEVICE_CONTROL",
             Self::AppControl => "EVENT_TYPE_APP_CONTROL",
+            Self::DnsQuery => "EVENT_TYPE_DNS_QUERY",
+            Self::AuthLogin => "EVENT_TYPE_AUTH_LOGIN",
+            Self::AuthLogout => "EVENT_TYPE_AUTH_LOGOUT",
+            Self::AuthFailed => "EVENT_TYPE_AUTH_FAILED",
+            Self::Sudo => "EVENT_TYPE_SUDO",
+            Self::Su => "EVENT_TYPE_SU",
+            Self::AccountChange => "EVENT_TYPE_ACCOUNT_CHANGE",
+            Self::Persistence => "EVENT_TYPE_PERSISTENCE",
+            Self::ProcessAccess => "EVENT_TYPE_PROCESS_ACCESS",
+            Self::MemoryProtect => "EVENT_TYPE_MEMORY_PROTECT",
+            Self::ProcessInjection => "EVENT_TYPE_PROCESS_INJECTION",
+            Self::KernelModule => "EVENT_TYPE_KERNEL_MODULE",
+            Self::KernelChange => "EVENT_TYPE_KERNEL_CHANGE",
+            Self::ContainerStart => "EVENT_TYPE_CONTAINER_START",
+            Self::ContainerStop => "EVENT_TYPE_CONTAINER_STOP",
+            Self::Inventory => "EVENT_TYPE_INVENTORY",
+            Self::FileOpen => "EVENT_TYPE_FILE_OPEN",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1083,6 +1446,23 @@ impl EventType {
             "EVENT_TYPE_INTRUSION" => Some(Self::Intrusion),
             "EVENT_TYPE_DEVICE_CONTROL" => Some(Self::DeviceControl),
             "EVENT_TYPE_APP_CONTROL" => Some(Self::AppControl),
+            "EVENT_TYPE_DNS_QUERY" => Some(Self::DnsQuery),
+            "EVENT_TYPE_AUTH_LOGIN" => Some(Self::AuthLogin),
+            "EVENT_TYPE_AUTH_LOGOUT" => Some(Self::AuthLogout),
+            "EVENT_TYPE_AUTH_FAILED" => Some(Self::AuthFailed),
+            "EVENT_TYPE_SUDO" => Some(Self::Sudo),
+            "EVENT_TYPE_SU" => Some(Self::Su),
+            "EVENT_TYPE_ACCOUNT_CHANGE" => Some(Self::AccountChange),
+            "EVENT_TYPE_PERSISTENCE" => Some(Self::Persistence),
+            "EVENT_TYPE_PROCESS_ACCESS" => Some(Self::ProcessAccess),
+            "EVENT_TYPE_MEMORY_PROTECT" => Some(Self::MemoryProtect),
+            "EVENT_TYPE_PROCESS_INJECTION" => Some(Self::ProcessInjection),
+            "EVENT_TYPE_KERNEL_MODULE" => Some(Self::KernelModule),
+            "EVENT_TYPE_KERNEL_CHANGE" => Some(Self::KernelChange),
+            "EVENT_TYPE_CONTAINER_START" => Some(Self::ContainerStart),
+            "EVENT_TYPE_CONTAINER_STOP" => Some(Self::ContainerStop),
+            "EVENT_TYPE_INVENTORY" => Some(Self::Inventory),
+            "EVENT_TYPE_FILE_OPEN" => Some(Self::FileOpen),
             _ => None,
         }
     }

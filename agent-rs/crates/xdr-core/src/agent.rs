@@ -43,7 +43,8 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
     let sent = Arc::new(AtomicU64::new(0));
     let bus_dropped = bus.dropped();
     for c in platform.collectors(&cfg) {
-        spawn_collector(c, bus.sink());
+        let sink = bus.sink().named(c.name());
+        spawn_collector(c, sink);
     }
     tokio::spawn(bus.run(id.agent_id.clone(), platform.resolver(), queue.clone(), wake.clone()));
     tokio::spawn(

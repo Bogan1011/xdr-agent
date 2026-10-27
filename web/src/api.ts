@@ -180,6 +180,13 @@ export interface XdrEvent {
   process_guid?: string;
   parent_process_guid?: string;
   storyline_guid?: string;
+  // Telemetry spec fields (0.10); empty values are omitted by the server.
+  summary?: string;
+  collector?: string;
+  category?: string;
+  action?: string;
+  outcome?: string;
+  [extra: string]: unknown;
 }
 
 export interface StoryNode {
@@ -614,6 +621,23 @@ export const typeLabels: Record<string, string> = {
   intrusion: "Intrusion prevention",
   device_control: "Device control",
   app_control: "Application control",
+  dns_query: "DNS query",
+  auth_login: "Login",
+  auth_logout: "Logout",
+  auth_failed: "Failed login",
+  sudo: "Sudo",
+  su: "Switch user",
+  account_change: "Account change",
+  persistence: "Persistence",
+  process_access: "Process memory access",
+  memory_protect: "RWX memory",
+  process_injection: "Code injection",
+  kernel_module: "Kernel module",
+  kernel_change: "Kernel change",
+  container_start: "Container started",
+  container_stop: "Container stopped",
+  inventory: "Inventory",
+  file_open: "Sensitive file opened",
 };
 
 // The policy modules in the order the console shows them.

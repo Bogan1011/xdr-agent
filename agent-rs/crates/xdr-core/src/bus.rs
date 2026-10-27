@@ -20,10 +20,22 @@ use crate::queue::Queue;
 pub struct EventSink {
     tx: mpsc::Sender<pb::Event>,
     dropped: Arc<AtomicU64>,
+    collector: &'static str,
 }
 
 impl EventSink {
-    pub fn emit(&self, e: pb::Event) {
+    /// The same sink, stamping events with the collector's name.
+    pub fn named(&self, collector: &'static str) -> EventSink {
+        EventSink {
+            collector,
+            ..self.clone()
+        }
+    }
+
+    pub fn emit(&self, mut e: pb::Event) {
+        if e.collector.is_empty() {
+            e.collector = self.collector.to_string();
+        }
         if self.tx.try_send(e).is_err() {
             self.dropped.fetch_add(1, Ordering::Relaxed);
         }
@@ -60,6 +72,7 @@ impl Bus {
             sink: EventSink {
                 tx,
                 dropped: Arc::new(AtomicU64::new(0)),
+                collector: "",
             },
             rx: Some(rx),
             local,
@@ -143,13 +156,15 @@ pub fn envelope(e: &mut pb::Event, agent_id: &str, resolver: &dyn ProcessResolve
     }
 }
 
-/// Same ranking as the Go agent (docs/architecture.md, "Priority").
+/// Telemetry priority from docs/telemetry.md: injection, credential and
+/// kernel tampering are critical; process starts and persistence high.
 pub fn priority_for(t: EventType) -> Priority {
     use EventType::*;
     match t {
-        ExecBlocked | YaraMatch | AgentTamper => Priority::Critical,
-        FimChange | WebReputation | Intrusion | DeviceControl | AppControl => Priority::High,
-        FileCreate | FileModify | FileDelete | FileRename | FileAttrib | NetListen => Priority::Low,
+        ExecBlocked | YaraMatch | AgentTamper | ProcessInjection | ProcessAccess | KernelModule => Priority::Critical,
+        FimChange | WebReputation | Intrusion | DeviceControl | AppControl | Persistence | MemoryProtect
+        | KernelChange | AuthFailed | Sudo | Su | AccountChange | FileOpen | ProcessExec => Priority::High,
+        FileCreate | FileModify | FileDelete | FileRename | FileAttrib | NetListen | Inventory => Priority::Low,
         _ => Priority::Normal,
     }
 }
@@ -164,7 +179,12 @@ pub fn actor_pid(e: &pb::Event) -> u32 {
         Some(Payload::Yara(y)) => y.pid,
         Some(Payload::Tamper(t)) => t.pid,
         Some(Payload::Policy(p)) => p.pid,
-        None => 0,
+        Some(Payload::Dns(d)) => d.pid,
+        Some(Payload::Auth(a)) => a.pid,
+        Some(Payload::Persistence(p)) => p.pid,
+        Some(Payload::Memory(m)) => m.source_pid,
+        Some(Payload::Kernel(k)) => k.pid,
+        Some(Payload::Inventory(_)) | None => 0,
     }
 }
 
@@ -196,6 +216,16 @@ mod tests {
         assert_eq!(e.priority(), Priority::Low);
         assert_eq!(e.process_context.unwrap().pid, 42);
         assert_eq!(priority_for(EventType::ExecBlocked), Priority::Critical);
-        assert_eq!(priority_for(EventType::ProcessExec), Priority::Normal);
+        assert_eq!(priority_for(EventType::ProcessExec), Priority::High);
+        assert_eq!(priority_for(EventType::ProcessInjection), Priority::Critical);
+        assert_eq!(priority_for(EventType::Inventory), Priority::Low);
+    }
+
+    #[test]
+    fn named_sink_stamps_collector() {
+        let mut bus = Bus::new(4);
+        let mut rx = bus.rx.take().unwrap();
+        bus.sink().named("dns").emit(new_event(EventType::DnsQuery));
+        assert_eq!(rx.try_recv().unwrap().collector, "dns");
     }
 }

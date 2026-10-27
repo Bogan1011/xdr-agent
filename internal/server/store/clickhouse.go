@@ -116,9 +116,51 @@ TTL toDateTime(ts) + INTERVAL %d DAY`, ttlDays)); err != nil {
 		return err
 	}
 	// Added in 0.9: the storyline (process tree) an event belongs to.
+	// Columns are only ever appended, in the order of the Event struct.
 	for _, q := range []string{
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS storyline_guid String DEFAULT '' AFTER process_start`,
 		`ALTER TABLE events ADD INDEX IF NOT EXISTS idx_storyline storyline_guid TYPE bloom_filter GRANULARITY 4`,
+		// Added in 0.10: the full Linux telemetry spec (docs/telemetry.md).
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS gid UInt32 DEFAULT 0`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS group_name LowCardinality(String) DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS euid UInt32 DEFAULT 0`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS login_uid UInt32 DEFAULT 4294967295`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS tty LowCardinality(String) DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS session_id UInt32 DEFAULT 0`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS capabilities String DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS md5 String DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS sha1 String DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS duration_ms UInt64 DEFAULT 0`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS pid_ns UInt64 DEFAULT 0`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS mnt_ns UInt64 DEFAULT 0`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS net_ns UInt64 DEFAULT 0`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS container_id String DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS container_name String DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS container_image String DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS pod_name String DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS pod_namespace LowCardinality(String) DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS inode UInt64 DEFAULT 0`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS device UInt64 DEFAULT 0`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS owner LowCardinality(String) DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS filesystem LowCardinality(String) DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS mount_point String DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS direction LowCardinality(String) DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS dns_query String DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS dns_type LowCardinality(String) DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS dns_rcode LowCardinality(String) DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS dns_answers Array(String)`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS category LowCardinality(String) DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS action LowCardinality(String) DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS outcome LowCardinality(String) DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS target_user String DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS target_pid UInt32 DEFAULT 0`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS target_process_guid String DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS old_value String DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS new_value String DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS collector LowCardinality(String) DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS summary String DEFAULT ''`,
+		`ALTER TABLE events ADD INDEX IF NOT EXISTS idx_dns dns_query TYPE bloom_filter GRANULARITY 4`,
+		`ALTER TABLE events ADD INDEX IF NOT EXISTS idx_container container_id TYPE bloom_filter GRANULARITY 4`,
 	} {
 		if err := c.conn.Exec(ctx, q); err != nil {
 			return err
@@ -170,6 +212,45 @@ type Event struct {
 	RemoteAddr    string            `json:"remote_addr" ch:"remote_addr"`
 	RemotePort    uint32            `json:"remote_port" ch:"remote_port"`
 	Metadata      map[string]string `json:"metadata,omitempty" ch:"metadata"`
+	// Telemetry spec fields (0.10).
+	GID            uint32   `json:"gid,omitempty" ch:"gid"`
+	Group          string   `json:"group,omitempty" ch:"group_name"`
+	EUID           uint32   `json:"euid,omitempty" ch:"euid"`
+	LoginUID       uint32   `json:"login_uid,omitempty" ch:"login_uid"`
+	TTY            string   `json:"tty,omitempty" ch:"tty"`
+	SessionID      uint32   `json:"session_id,omitempty" ch:"session_id"`
+	Capabilities   string   `json:"capabilities,omitempty" ch:"capabilities"`
+	MD5            string   `json:"md5,omitempty" ch:"md5"`
+	SHA1           string   `json:"sha1,omitempty" ch:"sha1"`
+	DurationMS     uint64   `json:"duration_ms,omitempty" ch:"duration_ms"`
+	PIDNamespace   uint64   `json:"pid_ns,omitempty" ch:"pid_ns"`
+	MntNamespace   uint64   `json:"mnt_ns,omitempty" ch:"mnt_ns"`
+	NetNamespace   uint64   `json:"net_ns,omitempty" ch:"net_ns"`
+	ContainerID    string   `json:"container_id,omitempty" ch:"container_id"`
+	ContainerName  string   `json:"container_name,omitempty" ch:"container_name"`
+	ContainerImage string   `json:"container_image,omitempty" ch:"container_image"`
+	PodName        string   `json:"pod_name,omitempty" ch:"pod_name"`
+	PodNamespace   string   `json:"pod_namespace,omitempty" ch:"pod_namespace"`
+	Inode          uint64   `json:"inode,omitempty" ch:"inode"`
+	Device         uint64   `json:"device,omitempty" ch:"device"`
+	Owner          string   `json:"owner,omitempty" ch:"owner"`
+	Filesystem     string   `json:"filesystem,omitempty" ch:"filesystem"`
+	MountPoint     string   `json:"mount_point,omitempty" ch:"mount_point"`
+	Direction      string   `json:"direction,omitempty" ch:"direction"`
+	DNSQuery       string   `json:"dns_query,omitempty" ch:"dns_query"`
+	DNSType        string   `json:"dns_type,omitempty" ch:"dns_type"`
+	DNSRcode       string   `json:"dns_rcode,omitempty" ch:"dns_rcode"`
+	DNSAnswers     []string `json:"dns_answers,omitempty" ch:"dns_answers"`
+	Category       string   `json:"category,omitempty" ch:"category"`
+	Action         string   `json:"action,omitempty" ch:"action"`
+	Outcome        string   `json:"outcome,omitempty" ch:"outcome"`
+	TargetUser     string   `json:"target_user,omitempty" ch:"target_user"`
+	TargetPID      uint32   `json:"target_pid,omitempty" ch:"target_pid"`
+	TargetGUID     string   `json:"target_process_guid,omitempty" ch:"target_process_guid"`
+	OldValue       string   `json:"old_value,omitempty" ch:"old_value"`
+	NewValue       string   `json:"new_value,omitempty" ch:"new_value"`
+	Collector      string   `json:"collector,omitempty" ch:"collector"`
+	Summary        string   `json:"summary,omitempty" ch:"summary"`
 }
 
 func (c *ClickHouse) Insert(ctx context.Context, events []Event) error {
@@ -232,8 +313,9 @@ func (c *ClickHouse) Query(ctx context.Context, q EventQuery) ([]Event, error) {
 	if q.Search != "" {
 		add(`(positionCaseInsensitive(exe, ?) > 0 OR positionCaseInsensitive(args, ?) > 0
 			OR positionCaseInsensitive(path, ?) > 0 OR positionCaseInsensitive(remote_addr, ?) > 0
-			OR positionCaseInsensitive(user, ?) > 0 OR positionCaseInsensitive(hostname, ?) > 0)`,
-			q.Search, q.Search, q.Search, q.Search, q.Search, q.Search)
+			OR positionCaseInsensitive(user, ?) > 0 OR positionCaseInsensitive(hostname, ?) > 0
+			OR positionCaseInsensitive(dns_query, ?) > 0 OR positionCaseInsensitive(summary, ?) > 0)`,
+			q.Search, q.Search, q.Search, q.Search, q.Search, q.Search, q.Search, q.Search)
 	}
 	if q.Limit <= 0 || q.Limit > 1000 {
 		q.Limit = 200

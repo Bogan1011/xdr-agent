@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -163,5 +164,42 @@ func TestRemoteDetector(t *testing.T) {
 	r.Reload(ctx)
 	if !reloaded {
 		t.Fatal("reload not delivered")
+	}
+}
+
+func TestNormalizeTelemetrySpecPayloads(t *testing.T) {
+	src := Source{TenantID: "t", AgentID: "a", Hostname: "h"}
+	dns := Normalize(src, &xdrv1.Event{
+		Type:      xdrv1.EventType_EVENT_TYPE_DNS_QUERY,
+		Collector: "dns",
+		Payload: &xdrv1.Event_Dns{Dns: &xdrv1.DnsEvent{
+			Query: "Example.COM.", QueryType: "A", ResponseCode: "NOERROR", Server: "1.1.1.1", ServerPort: 53,
+			Answers: []*xdrv1.DnsAnswer{{Type: "A", Data: "93.184.216.34", Ttl: 60}}, Exe: "/usr/bin/curl", Pid: 7,
+		}},
+		Container: &xdrv1.ContainerContext{ContainerId: "0123456789abcdef0123", Name: "web"},
+	})
+	if dns.DNSQuery != "example.com" || dns.Outcome != "success" || len(dns.DNSAnswers) != 1 || dns.Collector != "dns" {
+		t.Fatalf("dns row: %+v", dns)
+	}
+	if want := "pid 7 (curl) looked up example.com (A) → 93.184.216.34 in container web"; dns.Summary != want {
+		t.Fatalf("summary %q, want %q", dns.Summary, want)
+	}
+	sudo := Normalize(src, &xdrv1.Event{
+		Type: xdrv1.EventType_EVENT_TYPE_SUDO,
+		Payload: &xdrv1.Event_Auth{Auth: &xdrv1.AuthEvent{
+			Action: "sudo", User: "rutav", TargetUser: "root", Command: "/usr/bin/cat /etc/shadow", Success: true, Service: "sudo",
+		}},
+	})
+	if sudo.Summary != "rutav ran sudo as root: /usr/bin/cat /etc/shadow" || sudo.Outcome != "success" || sudo.LoginUID != 4294967295 {
+		t.Fatalf("sudo row: %+v", sudo)
+	}
+	p := Normalize(src, &xdrv1.Event{
+		Type: xdrv1.EventType_EVENT_TYPE_PERSISTENCE,
+		Payload: &xdrv1.Event_Persistence{Persistence: &xdrv1.PersistenceEvent{
+			PersistenceType: "cron", Operation: "modified", Path: "/etc/crontab", NewValue: "+ * * * * * root /tmp/x",
+		}},
+	})
+	if p.Category != "cron" || !strings.Contains(p.Summary, "modified cron persistence at /etc/crontab: + * * * * * root /tmp/x") {
+		t.Fatalf("persistence row: %+v", p)
 	}
 }

@@ -650,6 +650,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "md-5"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+dependencies = [
+ "cfg-if",
+ "digest",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1119,6 +1129,17 @@ dependencies = [
  "ryu",
  "serde",
  "unsafe-libyaml",
+]
+
+[[package]]
+name = "sha1"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
 ]
 
 [[package]]
@@ -1769,7 +1790,7 @@ dependencies = [
 
 [[package]]
 name = "xdr-agent"
-version = "0.8.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "tokio",
@@ -1781,7 +1802,7 @@ dependencies = [
 
 [[package]]
 name = "xdr-core"
-version = "0.8.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "prost",
@@ -1799,12 +1820,14 @@ dependencies = [
 
 [[package]]
 name = "xdr-linux"
-version = "0.8.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "hex",
  "inotify",
  "libc",
+ "md-5",
+ "sha1",
  "sha2",
  "tokio",
  "tracing",
@@ -1815,7 +1838,7 @@ dependencies = [
 
 [[package]]
 name = "xdr-proto"
-version = "0.8.0"
+version = "0.10.0"
 dependencies = [
  "prost",
  "tonic",
