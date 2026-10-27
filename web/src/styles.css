@@ -280,3 +280,8 @@ h3 { font-size: 14px; margin: 18px 0 8px; }
 
 .nav-count { margin-left: auto; background: var(--critical); box-shadow: 0 0 8px var(--critical); color: #fff; border-radius: 9px; padding: 0 7px; font-size: 12px; font-weight: 600; }
 pre.code.terminal { white-space: pre-wrap; word-break: normal; overflow-wrap: anywhere; max-height: 480px; overflow-y: auto; margin: 6px 0 0; }
+
+/* remote shell */
+.terminal-wrap { display: flex; flex-direction: column; gap: 8px; }
+.terminal { height: calc(100vh - 290px); min-height: 360px; background: #05070d; border: 1px solid var(--border); border-radius: 6px; padding: 6px; overflow: hidden; }
+td.wrap { white-space: normal; word-break: break-all; }

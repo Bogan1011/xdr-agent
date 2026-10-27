@@ -33,6 +33,8 @@ type Config struct {
 	LogLevel  string `yaml:"log_level"`
 	// ScanMaxBytes is the largest file the YARA scanner reads.
 	ScanMaxBytes int64 `yaml:"scan_max_bytes"`
+	// DisableRemoteShell refuses remote shells from the console on this host.
+	DisableRemoteShell bool `yaml:"disable_remote_shell"`
 
 	// Path is the file the config was loaded from.
 	Path string `yaml:"-"`
