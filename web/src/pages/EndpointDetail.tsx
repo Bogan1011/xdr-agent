@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { PreventionState, api, formatBytes, timeAgo } from "../api";
+import { PreventionState, api, formatBytes, policyModules, timeAgo } from "../api";
 import { usePoll } from "../hooks";
 import EventTable from "../components/EventTable";
 import Timeline from "../components/Timeline";
 import { ProtectionBadge, StatusBadge, VersionCell, isOutdated, isSet } from "./Endpoints";
 import { CommandList, EndpointResponse } from "../components/Response";
 import { AlertTable } from "./Alerts";
-import PreventionForm from "../components/PreventionForm";
+import { moduleOn } from "../components/PolicyModules";
 
 export default function EndpointDetail() {
   const { id = "" } = useParams();
@@ -20,6 +20,7 @@ export default function EndpointDetail() {
   const commands = usePoll(() => api.commands(id), 5000, [id]);
   const fleet = usePoll(api.fleet, 60000);
   const prevention = usePoll(() => api.agentPrevention(id), 15000, [id]);
+  const policies = usePoll(api.policies, 0);
   const [token, setToken] = useState("");
 
   const a = agent.data;
@@ -55,10 +56,10 @@ export default function EndpointDetail() {
   async function showToken() {
     setToken(token ? "" : (await api.maintenanceToken(id)).token);
   }
-  async function setCustomPrevention(custom: boolean) {
-    if (!custom && !confirm(`Return ${a!.hostname} to the fleet prevention policy? Its own policy is discarded.`)) return;
-    await api.setAgentPrevention(id, custom, custom ? prevention.data!.policy : undefined);
+  async function changePolicy(policyId: number) {
+    await api.setAgentPolicy(id, policyId);
     prevention.refresh();
+    agent.refresh();
   }
   async function rebaseline() {
     if (!confirm(`Accept the current state of the monitored files on ${a!.hostname} as the new FIM baseline?`)) return;
@@ -139,26 +140,18 @@ export default function EndpointDetail() {
       {!a.revoked && prevention.data && (
         <section className="card">
           <div className="card-head">
-            <h2>Prevention</h2>
+            <h2>Policy</h2>
             <div className="actions">
               {prevention.data.state.fim_active && <button onClick={rebaseline}>Accept changes as FIM baseline</button>}
-              <button onClick={() => setCustomPrevention(!prevention.data!.custom)}>
-                {prevention.data.custom ? "Use fleet policy" : "Customize for this endpoint"}
-              </button>
+              <select value={prevention.data.policy_id} onChange={(e) => changePolicy(Number(e.target.value))} aria-label="Policy">
+                {(policies.data ?? [{ id: prevention.data.policy_id, name: prevention.data.policy_name }]).map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <Link className="button" to={`/policies/${prevention.data.policy_id}`}>Edit policy</Link>
             </div>
           </div>
-          <PreventionStatus state={prevention.data.state} />
-          {prevention.data.custom ? (
-            <PreventionForm
-              policy={prevention.data.policy}
-              onSave={async (p) => {
-                await api.setAgentPrevention(id, true, p);
-                prevention.refresh();
-              }}
-            />
-          ) : (
-            <div className="muted small">Follows the <Link to="/prevention">fleet prevention policy</Link>.</div>
-          )}
+          <PreventionStatus state={prevention.data.state} modules={policyModules.filter((m) => moduleOn(prevention.data!.policy, m.key)).map((m) => m.label)} />
         </section>
       )}
 
@@ -193,7 +186,7 @@ export default function EndpointDetail() {
             <option value="file_create,file_modify,file_delete,file_rename,file_attrib">File</option>
             <option value="net_connect,net_listen">Network</option>
             <option value="agent_tamper">Agent tamper</option>
-            <option value="exec_blocked,fim_change">Prevention</option>
+            <option value="exec_blocked,fim_change,yara_match,web_reputation,intrusion,device_control,app_control">Prevention</option>
           </select>
         </div>
         {events.data && <EventTable events={events.data} showHost={false} />}
@@ -202,23 +195,23 @@ export default function EndpointDetail() {
   );
 }
 
-function PreventionStatus({ state: s }: { state: PreventionState }) {
+function PreventionStatus({ state: s, modules }: { state: PreventionState; modules: string[] }) {
+  const on = (v: boolean | undefined, text: string) => (v ? <span className="status status-good">{text}</span> : <span className="muted">Off</span>);
   return (
     <>
       {s.error && <div className="error">{s.error}</div>}
+      <div className="muted small" style={{ marginBottom: 10 }}>
+        Modules on: {modules.length ? modules.join(", ") : "none"}
+        {s.policy_name ? ` · agent reports policy "${s.policy_name}"` : " · waiting for the agent to apply it"}
+      </div>
       <dl className="facts">
-        <div>
-          <dt>Exec blocking</dt>
-          <dd>{s.exec_blocking ? <span className="status status-good">Active</span> : "Off"} · {(s.blocked_hashes ?? 0).toLocaleString()} hashes</dd>
-        </div>
-        <div>
-          <dt>File integrity</dt>
-          <dd>{s.fim_active ? <span className="status status-good">Monitoring {(s.fim_files ?? 0).toLocaleString()} files</span> : "Off"}</dd>
-        </div>
-        <div>
-          <dt>Host firewall</dt>
-          <dd>{s.firewall_applied ? <span className="status status-good">Applied</span> : "Off"}</dd>
-        </div>
+        <div><dt>Anti-malware</dt><dd>{on(s.realtime_scan, "Real-time scan")}{s.exec_blocking && <> · blocking {(s.blocked_hashes ?? 0).toLocaleString()} hashes</>}</dd></div>
+        <div><dt>Web reputation</dt><dd>{s.web_reputation_addrs ? <span className="status status-good">{s.web_reputation_blocking ? "Blocking" : "Watching"} {s.web_reputation_addrs.toLocaleString()} addresses</span> : <span className="muted">Off</span>}</dd></div>
+        <div><dt>File integrity</dt><dd>{on(s.fim_active, `Monitoring ${(s.fim_files ?? 0).toLocaleString()} files`)}</dd></div>
+        <div><dt>Firewall</dt><dd>{on(s.firewall_applied, "Applied")}</dd></div>
+        <div><dt>Intrusion prevention</dt><dd>{on(s.intrusion_prevention, `Active · ${s.banned_addrs ?? 0} banned`)}</dd></div>
+        <div><dt>Device control</dt><dd>{on(s.device_control, `Active · ${s.blocked_devices ?? 0} blocked`)}</dd></div>
+        <div><dt>Application control</dt><dd>{on(s.app_control, s.exec_blocking ? "Enforcing" : "Active")}</dd></div>
       </dl>
     </>
   );

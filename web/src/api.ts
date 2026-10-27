@@ -25,6 +25,8 @@ export interface Agent {
   tamper_protected: boolean;
   updating: boolean;
   pam_record_all: boolean;
+  policy_id: number;
+  policy_name: string;
 }
 
 export interface Fleet {
@@ -269,9 +271,21 @@ export interface FirewallRule {
 }
 
 export interface PreventionPolicy {
-  block_exec: boolean;
+  anti_malware: { enabled: boolean; block_known_bad: boolean; auto_quarantine: boolean };
+  web_reputation: { enabled: boolean; block: boolean; use_threat_intel: boolean; blocked_domains: string[]; allowed_domains: string[] };
   fim: { enabled: boolean; paths: string[]; exclude: string[]; interval_minutes: number };
   firewall: { enabled: boolean; default_deny_inbound: boolean; rules: FirewallRule[] };
+  intrusion_prevention: {
+    enabled: boolean;
+    prevent: boolean;
+    max_failures: number;
+    window_seconds: number;
+    ban_minutes: number;
+    allow: string[];
+  };
+  device_control: { enabled: boolean; usb_storage: "allow" | "block"; allowed_devices: string[] };
+  activity_monitoring: { process: boolean; file: boolean; network: boolean };
+  application_control: { enabled: boolean; block: boolean; blocked_paths: string[]; blocked_sha256: string[] };
 }
 
 export interface PreventionState {
@@ -281,6 +295,31 @@ export interface PreventionState {
   fim_files?: number;
   firewall_applied?: boolean;
   error?: string;
+  policy_name?: string;
+  realtime_scan?: boolean;
+  web_reputation_addrs?: number;
+  web_reputation_blocking?: boolean;
+  intrusion_prevention?: boolean;
+  banned_addrs?: number;
+  device_control?: boolean;
+  blocked_devices?: number;
+  app_control?: boolean;
+}
+
+export interface PolicySummary {
+  id: number;
+  name: string;
+  description: string;
+  is_default: boolean;
+  endpoints: number;
+  updated_at: string;
+  modules: string[];
+}
+
+export interface PolicyDetail {
+  policy: PolicySummary & { policy: PreventionPolicy };
+  endpoint_list: { id: string; hostname: string; online: boolean }[];
+  intel: { hashes: number; ips: number; domains: number };
 }
 
 export class ApiError extends Error {
@@ -404,15 +443,21 @@ export const api = {
   privilegedAccounts: () => request<Inventory[]>("GET", "/api/v1/pam/accounts"),
   pamSessions: (agentId = "") =>
     request<PamSession[]>("GET", `/api/v1/pam/sessions${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ""}`),
-  globalPrevention: () => request<{ policy: PreventionPolicy; blocked_hashes: number }>("GET", "/api/v1/prevention/policy"),
-  setGlobalPrevention: (p: PreventionPolicy) => request<void>("PUT", "/api/v1/prevention/policy", p),
+  policies: () => request<PolicySummary[]>("GET", "/api/v1/policies"),
+  policy: (id: number) => request<PolicyDetail>("GET", `/api/v1/policies/${id}`),
+  createPolicy: (name: string, description: string, copy_from: number) =>
+    request<{ id: number }>("POST", "/api/v1/policies", { name, description, copy_from }),
+  updatePolicy: (id: number, name: string, description: string, policy: PreventionPolicy) =>
+    request<void>("PUT", `/api/v1/policies/${id}`, { name, description, policy }),
+  deletePolicy: (id: number) => request<void>("DELETE", `/api/v1/policies/${id}`),
+  assignPolicy: (id: number, agent_ids: string[]) => request<void>("PUT", `/api/v1/policies/${id}/endpoints`, { agent_ids }),
   agentPrevention: (agentId: string) =>
-    request<{ custom: boolean; policy: PreventionPolicy; state: PreventionState }>(
+    request<{ policy_id: number; policy_name: string; is_default: boolean; policy: PreventionPolicy; state: PreventionState }>(
       "GET",
       `/api/v1/agents/${encodeURIComponent(agentId)}/prevention`,
     ),
-  setAgentPrevention: (agentId: string, custom: boolean, policy?: PreventionPolicy) =>
-    request<void>("PUT", `/api/v1/agents/${encodeURIComponent(agentId)}/prevention`, { custom, policy }),
+  setAgentPolicy: (agentId: string, policy_id: number) =>
+    request<void>("PUT", `/api/v1/agents/${encodeURIComponent(agentId)}/policy`, { policy_id }),
   pamSession: (id: number) => request<{ session: PamSession; output: string }>("GET", `/api/v1/pam/sessions/${id}`),
 };
 
@@ -439,7 +484,7 @@ export const statusLabels: Record<AlertStatus, string> = {
 export type Category = "process" | "file" | "network";
 
 export function categoryOf(type: string): Category {
-  if (type.startsWith("process") || type === "exec_blocked") return "process";
+  if (type.startsWith("process") || type === "exec_blocked" || type === "app_control") return "process";
   if (type.startsWith("file") || type === "yara_match" || type === "fim_change") return "file";
   return "network";
 }
@@ -459,7 +504,25 @@ export const typeLabels: Record<string, string> = {
   agent_tamper: "Agent tamper",
   exec_blocked: "Exec blocked",
   fim_change: "Integrity drift",
+  web_reputation: "Web reputation",
+  intrusion: "Intrusion prevention",
+  device_control: "Device control",
+  app_control: "Application control",
 };
+
+// The policy modules in the order the console shows them.
+export const policyModules = [
+  { key: "anti_malware", label: "Anti-malware" },
+  { key: "web_reputation", label: "Web reputation" },
+  { key: "file_integrity", label: "File integrity" },
+  { key: "firewall", label: "Firewall" },
+  { key: "intrusion_prevention", label: "Intrusion prevention" },
+  { key: "device_control", label: "Device control" },
+  { key: "activity_monitoring", label: "Activity monitoring" },
+  { key: "application_control", label: "Application control" },
+] as const;
+
+export type ModuleKey = (typeof policyModules)[number]["key"];
 
 export function timeAgo(iso: string): string {
   const t = new Date(iso).getTime();

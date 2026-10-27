@@ -280,3 +280,20 @@ h3 { font-size: 14px; margin: 18px 0 8px; }
 
 .nav-count { margin-left: auto; background: var(--critical); box-shadow: 0 0 8px var(--critical); color: #fff; border-radius: 9px; padding: 0 7px; font-size: 12px; font-weight: 600; }
 pre.code.terminal { white-space: pre-wrap; word-break: normal; overflow-wrap: anywhere; max-height: 480px; overflow-y: auto; margin: 6px 0 0; }
+
+/* Policies */
+.module-dots { display: inline-flex; gap: 4px; vertical-align: middle; }
+.module-dots .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--grid); }
+.module-dots .dot.on { background: var(--good); box-shadow: 0 0 6px var(--good); }
+.policy-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 16px; align-items: start; }
+.module-nav { display: flex; flex-direction: column; gap: 4px; padding: 10px; }
+.module-nav button { display: flex; justify-content: space-between; align-items: center; text-align: left; background: transparent; border-color: transparent; }
+.module-nav button.active { border-color: var(--accent); box-shadow: var(--glow); }
+.pill { font-size: 11px; padding: 1px 8px; border-radius: 999px; color: var(--muted); border: 1px solid var(--border); }
+.pill.on { color: var(--good); border-color: color-mix(in srgb, var(--good) 50%, transparent); }
+.module-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.module-grid .tile { text-align: left; }
+@media (max-width: 800px) {
+  .policy-layout { grid-template-columns: minmax(0, 1fr); }
+  .module-nav { flex-direction: row; flex-wrap: wrap; }
+}
