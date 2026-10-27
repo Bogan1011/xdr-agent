@@ -38,7 +38,7 @@ Legend: ✅ have it · 🟡 partial · ❌ not yet
 | **Response** | | | |
 | Kill process, quarantine file | ✅ | ✅ | ✅ |
 | Network isolation | ✅ | ✅ | ✅ |
-| Remote shell / live response | ❌ | ✅ | ✅ (Real Time Response) |
+| Remote shell / live response | ✅ browser shell over the agent's mTLS link, recorded, watchable live | ✅ | ✅ (Real Time Response) |
 | Automated playbooks / SOAR | 🟡 per-rule auto-response | ✅ | ✅ (Fusion SOAR) |
 | **Fleet** | | | |
 | Remote install / uninstall | ✅ SSH + one-liner | ✅ | ✅ |
@@ -46,7 +46,8 @@ Legend: ✅ have it · 🟡 partial · ❌ not yet
 | Tamper protection | ✅ maintenance token | ✅ | ✅ uninstall token |
 | **Privileged access (PAM)** | | | |
 | Just-in-time sudo with approval | ✅ | ❌ (no native PAM) | ❌ (no native PAM) |
-| Privileged session recording | ✅ sudo sessions | ❌ | ❌ |
+| Privileged session recording | ✅ sudo sessions + console remote shells | ❌ | ❌ |
+| Live view of logged-in users | ✅ who is on which terminal, what they run now | 🟡 via search | 🟡 via RTR `ps` / `users` |
 | Privileged account inventory | ✅ Linux local accounts | 🟡 identity posture (AD / Entra) | 🟡 Falcon Identity (AD / Entra) |
 | Identity threat detection | 🟡 new-privileged-account alert | ✅ | ✅ |
 | Password vaulting, credential rotation | ❌ | ❌ | ❌ |
@@ -86,8 +87,9 @@ Legend: ✅ have it · 🟡 partial · ❌ not yet
    scripts run through an interpreter (fanotify only sees direct execs).
 5. **Vulnerability and posture**: package inventory matched against CVE
    feeds, CIS-style configuration checks, a per-host risk score.
-6. **Live response**: an audited remote shell over the agent's mTLS
-   channel, recorded like PAM sessions.
+6. **Live response**: the remote shell and live view shipped in 0.5.0.
+   Next: file upload/download in the shell, and per-admin roles for who may
+   open a shell on which hosts.
 7. **PAM depth**: password vaulting and rotation for local root, SSH
    certificate issuance instead of standing `authorized_keys`, command
    allow-lists per grant, Slack / email approval.

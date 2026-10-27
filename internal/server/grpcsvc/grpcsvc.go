@@ -23,6 +23,7 @@ import (
 	xdrv1 "github.com/Bogan1011/xdr-agent/gen/xdr/v1"
 	"github.com/Bogan1011/xdr-agent/internal/policy"
 	"github.com/Bogan1011/xdr-agent/internal/server/detect"
+	"github.com/Bogan1011/xdr-agent/internal/server/live"
 	"github.com/Bogan1011/xdr-agent/internal/server/pki"
 	"github.com/Bogan1011/xdr-agent/internal/server/release"
 	"github.com/Bogan1011/xdr-agent/internal/server/store"
@@ -76,6 +77,7 @@ type Agents struct {
 	Log    *slog.Logger
 	// DownloadsDir holds the agent binaries offered for self-update.
 	DownloadsDir string
+	Hub          *live.Hub
 }
 
 var commandTypes = map[string]xdrv1.CommandType{
@@ -98,6 +100,30 @@ type agentCtx struct{ id, hostname string }
 // AuthInterceptor maps the verified client certificate to an enrolled,
 // non-revoked agent and stores it in the context.
 func (s *Agents) AuthInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	ctx, err := s.authenticate(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return handler(ctx, req)
+}
+
+// StreamAuthInterceptor is AuthInterceptor for streaming calls.
+func (s *Agents) StreamAuthInterceptor(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	ctx, err := s.authenticate(ss.Context())
+	if err != nil {
+		return err
+	}
+	return handler(srv, &authStream{ServerStream: ss, ctx: ctx})
+}
+
+type authStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (s *authStream) Context() context.Context { return s.ctx }
+
+func (s *Agents) authenticate(ctx context.Context) (context.Context, error) {
 	p, ok := peer.FromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "no peer")
@@ -114,7 +140,7 @@ func (s *Agents) AuthInterceptor(ctx context.Context, req any, info *grpc.UnaryS
 	if err != nil {
 		return nil, status.Error(codes.Unavailable, "lookup failed")
 	}
-	return handler(context.WithValue(ctx, ctxKey{}, agentCtx{id: id, hostname: host}), req)
+	return context.WithValue(ctx, ctxKey{}, agentCtx{id: id, hostname: host}), nil
 }
 
 func fromCtx(ctx context.Context) agentCtx { return ctx.Value(ctxKey{}).(agentCtx) }
@@ -197,6 +223,15 @@ func GlobalPrevention(ctx context.Context, db *store.Postgres) (*xdrv1.Preventio
 		return policy.Default(), err
 	}
 	return policy.UnmarshalJSON(raw)
+}
+
+// Live keeps the agent reachable for remote shells and live activity.
+func (s *Agents) Live(st xdrv1.AgentService_LiveServer) error {
+	if s.Hub == nil {
+		return status.Error(codes.Unimplemented, "live stream not available")
+	}
+	a := fromCtx(st.Context())
+	return s.Hub.Serve(a.id, a.hostname, st)
 }
 
 func (s *Agents) SendEvents(ctx context.Context, req *xdrv1.EventBatch) (*xdrv1.SendEventsResponse, error) {

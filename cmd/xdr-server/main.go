@@ -27,6 +27,7 @@ import (
 	"github.com/Bogan1011/xdr-agent/internal/server/deploy"
 	"github.com/Bogan1011/xdr-agent/internal/server/detect"
 	"github.com/Bogan1011/xdr-agent/internal/server/grpcsvc"
+	"github.com/Bogan1011/xdr-agent/internal/server/live"
 	"github.com/Bogan1011/xdr-agent/internal/server/pki"
 	"github.com/Bogan1011/xdr-agent/internal/server/store"
 )
@@ -129,10 +130,12 @@ func run(log *slog.Logger) error {
 		MinVersion:   tls.VersionTLS13,
 	}
 	downloads := env("XDR_DOWNLOADS_DIR", "")
-	agents := &grpcsvc.Agents{DB: db, Events: events, Detect: det, Log: log, DownloadsDir: downloads}
+	hub := &live.Hub{DB: db, Log: log.With("component", "live")}
+	agents := &grpcsvc.Agents{DB: db, Events: events, Detect: det, Log: log, DownloadsDir: downloads, Hub: hub}
 	agentSrv := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(agentTLS)),
 		grpc.UnaryInterceptor(agents.AuthInterceptor),
+		grpc.StreamInterceptor(agents.StreamAuthInterceptor),
 		grpc.MaxRecvMsgSize(32<<20),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: 30 * time.Second, PermitWithoutStream: true}),
 	)
@@ -148,7 +151,7 @@ func run(log *slog.Logger) error {
 			AgentPort:     agentPort,
 			WebDir:        env("XDR_WEB_DIR", ""),
 			DownloadsDir:  downloads,
-		}, db, events, ca, &deploy.Deployer{DB: db, Log: log}, det, log).Handler(),
+		}, db, events, ca, &deploy.Deployer{DB: db, Log: log}, det, log).WithLive(hub).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
