@@ -10,7 +10,8 @@ agent:
 
 # Static Rust agent in bin/xdr-agent-rs, built in Docker (no Rust toolchain needed).
 agent-rs:
-	docker build -f agent-rs/Dockerfile --output type=local,dest=bin agent-rs
+	docker build -t xdr-agent-rs-build -f agent-rs/Dockerfile agent-rs
+	mkdir -p bin && id=$$(docker create xdr-agent-rs-build) && docker cp $$id:/xdr-agent-rs bin/xdr-agent-rs; docker rm $$id >/dev/null
 
 server:
 	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o bin/xdr-server ./cmd/xdr-server
