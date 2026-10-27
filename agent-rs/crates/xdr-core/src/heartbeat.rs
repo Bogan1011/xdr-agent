@@ -54,7 +54,10 @@ impl<P: Platform> Heartbeat<P> {
             });
             req.set_timeout(Duration::from_secs(10));
             let resp = match self.client.heartbeat(req).await {
-                Ok(r) => r.into_inner(),
+                Ok(r) => {
+                    self.commands.updater.confirm();
+                    r.into_inner()
+                }
                 Err(status) => {
                     tracing::warn!(code = ?status.code(), msg = status.message(), "heartbeat failed");
                     continue;

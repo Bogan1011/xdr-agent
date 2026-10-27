@@ -1803,7 +1803,7 @@ dependencies = [
 
 [[package]]
 name = "xdr-agent"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "anyhow",
  "tokio",
@@ -1815,14 +1815,17 @@ dependencies = [
 
 [[package]]
 name = "xdr-core"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "anyhow",
+ "hex",
  "prost",
  "rcgen",
  "rusqlite",
  "serde",
+ "serde_json",
  "serde_yaml_ng",
+ "sha2",
  "tempfile",
  "tokio",
  "tokio-stream",
@@ -1834,7 +1837,7 @@ dependencies = [
 
 [[package]]
 name = "xdr-linux"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "anyhow",
  "hex",
@@ -1855,7 +1858,7 @@ dependencies = [
 
 [[package]]
 name = "xdr-proto"
-version = "0.10.0"
+version = "0.10.1"
 dependencies = [
  "prost",
  "tonic",

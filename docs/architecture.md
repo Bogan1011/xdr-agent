@@ -165,13 +165,16 @@ The Go agent's eBPF C program and compiled objects are kept in
 `agent-rs/bpf/` for the eBPF port.
 
 Porting order to parity: response actions and Live commands (done in
-0.10.0), eBPF CO-RE collectors (reusing the committed BPF objects), YARA
-scanning and detection content, prevention
-modules (fanotify exec/script blocking, application control, FIM, firewall,
-IPS, web reputation, device control including read-only USB), tamper
-protection and the self-protection password, PAM, live shell and activity,
-self-update, bash command telemetry (uprobes on readline and
-parse_and_execute, emitting ShellCommandEvent).
+0.10.0), self-update (done in 0.10.1, `xdr-core/src/update.rs`: chunked
+download over mTLS, SHA-256 and `-version` check, atomic swap, exit so
+systemd restarts it, rollback to the previous binary when the new one does
+not reach the console within 3 minutes or 3 starts), eBPF CO-RE collectors
+(reusing the committed BPF objects), YARA scanning and detection content,
+prevention modules (fanotify exec/script blocking, application control, FIM,
+firewall, IPS, web reputation, device control including read-only USB),
+tamper protection and the self-protection password, PAM, live shell and
+activity, bash command telemetry (uprobes on readline and parse_and_execute,
+emitting ShellCommandEvent).
 
 ## Detection pipeline (0.9)
 

@@ -12,6 +12,7 @@ pub mod live;
 pub mod platform;
 pub mod queue;
 pub mod transport;
+pub mod update;
 pub mod uploader;
 
 pub use xdr_proto::v1 as pb;

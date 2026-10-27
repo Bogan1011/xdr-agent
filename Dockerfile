@@ -19,12 +19,15 @@ WORKDIR /src
 COPY agent-rs/ ./
 ARG VERSION=dev
 # A binary dropped in agent-rs/prebuilt/ (for hosts that can't reach
-# crates.io) is used as is; otherwise the agent is compiled here.
+# crates.io) is used as is, and the release takes its version, so updates
+# check against what it reports; otherwise the agent is compiled here.
 RUN mkdir -p /out/downloads && \
-    if [ -f prebuilt/xdr-agent-linux-amd64 ]; then cp prebuilt/xdr-agent-linux-amd64 /out/downloads/; \
+    if [ -f prebuilt/xdr-agent-linux-amd64 ]; then cp prebuilt/xdr-agent-linux-amd64 /out/downloads/ && \
+      chmod 755 /out/downloads/xdr-agent-linux-amd64 && \
+      /out/downloads/xdr-agent-linux-amd64 -version > /out/downloads/VERSION; \
     else XDR_VERSION=${VERSION} cargo build --release --locked -p xdr-agent && \
-      cp target/release/xdr-agent /out/downloads/xdr-agent-linux-amd64; fi && \
-    cd /out/downloads && sha256sum xdr-agent-linux-* > SHA256SUMS && echo "${VERSION}" > VERSION
+      cp target/release/xdr-agent /out/downloads/xdr-agent-linux-amd64 && echo "${VERSION}" > /out/downloads/VERSION; fi && \
+    cd /out/downloads && sha256sum xdr-agent-linux-* > SHA256SUMS
 
 FROM golang:1.26-alpine AS go
 WORKDIR /src

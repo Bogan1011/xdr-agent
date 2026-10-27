@@ -15,6 +15,7 @@ use crate::heartbeat::{self, Heartbeat};
 use crate::live::Live;
 use crate::platform::{Collector, Platform};
 use crate::queue::Queue;
+use crate::update::Updater;
 use crate::uploader::Uploader;
 use crate::{identity, transport};
 
@@ -28,6 +29,8 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
         tracing::info!(name = %p.name, version = p.version, "last known policy loaded from cache");
     }
     platform.restore();
+    let updater = Arc::new(Updater::new(&cfg.state_dir));
+    updater.check();
 
     let id = loop {
         match identity::load_or_enroll(&cfg, platform.host_info()).await {
@@ -41,7 +44,14 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
     tracing::info!(agent_id = %id.agent_id, "agent identity loaded");
     let client = transport::agent_client(&cfg, &id)?;
     let hb_wake = Arc::new(Notify::new());
-    let commands = Arc::new(Commands::new(client.clone(), platform.clone(), hb_wake.clone()));
+    let restart = Arc::new(Notify::new());
+    let commands = Arc::new(Commands::new(
+        client.clone(),
+        platform.clone(),
+        hb_wake.clone(),
+        updater,
+        restart.clone(),
+    ));
 
     let bus = Bus::new(20_000);
     let wake = Arc::new(Notify::new());
@@ -83,8 +93,12 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
         .run(),
     );
 
-    shutdown_signal().await;
-    tracing::info!("stopping");
+    tokio::select! {
+        _ = shutdown_signal() => tracing::info!("stopping"),
+        // Exit non-zero so systemd restarts the unit into the new binary
+        // whatever its Restart= setting.
+        _ = restart.notified() => std::process::exit(3),
+    }
     Ok(())
 }
 
