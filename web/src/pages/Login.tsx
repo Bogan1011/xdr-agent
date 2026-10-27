@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react";
 import { api } from "../api";
+import { icons } from "../icons";
 
 export default function Login({ onLogin }: { onLogin: (user: string) => void }) {
   const [username, setUsername] = useState("admin");
@@ -25,7 +26,7 @@ export default function Login({ onLogin }: { onLogin: (user: string) => void }) 
     <div className="login">
       <form className="card login-card" onSubmit={submit}>
         <div className="brand">
-          <span className="brand-mark" aria-hidden>◆</span> XDR Console
+          <span className="brand-mark" aria-hidden>{icons.logo}</span><span className="brand-text">XDR<span>Console</span></span>
         </div>
         <label>
           Username
