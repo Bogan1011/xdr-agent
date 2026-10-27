@@ -46,5 +46,8 @@ fn main() -> Result<()> {
         .worker_threads(2)
         .enable_all()
         .build()?
-        .block_on(xdr_core::agent::run(cfg, xdr_linux::Linux::default()))
+        .block_on(async {
+            let platform = xdr_linux::Linux::new(&cfg);
+            xdr_core::agent::run(cfg, platform).await
+        })
 }

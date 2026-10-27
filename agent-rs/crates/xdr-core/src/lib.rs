@@ -4,9 +4,11 @@
 
 pub mod agent;
 pub mod bus;
+pub mod commands;
 pub mod config;
 pub mod heartbeat;
 pub mod identity;
+pub mod live;
 pub mod platform;
 pub mod queue;
 pub mod transport;

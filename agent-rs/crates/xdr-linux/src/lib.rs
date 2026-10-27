@@ -1,6 +1,7 @@
 //! Linux adapters for the XDR agent core: netlink process events, inotify
 //! file events, /proc/net connections and procfs process identity. eBPF CO-RE
-//! and fanotify prevention are ported next.
+//! and fanotify prevention are ported next. Response actions live in
+//! [`response`].
 
 pub mod file;
 pub mod host;
@@ -8,6 +9,7 @@ pub mod network;
 pub mod process;
 pub mod procfs;
 pub mod resolver;
+pub mod response;
 
 use std::sync::Arc;
 
@@ -18,14 +20,19 @@ use xdr_core::platform::{Collector, Platform, ProcessResolver, Usage};
 pub struct Linux {
     hasher: Arc<procfs::Hasher>,
     resolver: Arc<resolver::Resolver>,
+    responder: response::Responder,
 }
 
-impl Default for Linux {
-    fn default() -> Self {
+impl Linux {
+    pub fn new(cfg: &Config) -> Self {
         let hasher = Arc::new(procfs::Hasher::new(50_000));
         Linux {
             resolver: Arc::new(resolver::Resolver::new(hasher.clone())),
             hasher,
+            responder: response::Responder {
+                state_dir: cfg.state_dir.clone(),
+                console: vec![cfg.server.clone(), cfg.enroll_server.clone()],
+            },
         }
     }
 }
@@ -56,5 +63,17 @@ impl Platform for Linux {
 
     fn usage(&self) -> Usage {
         host::usage()
+    }
+
+    fn respond(&self, c: &pb::AgentCommand) -> anyhow::Result<String> {
+        self.responder.respond(c)
+    }
+
+    fn isolated(&self) -> bool {
+        self.responder.isolated()
+    }
+
+    fn restore(&self) {
+        self.responder.restore_isolation();
     }
 }

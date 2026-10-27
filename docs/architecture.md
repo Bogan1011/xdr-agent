@@ -101,7 +101,7 @@ the event bus and the uploader:
 |---|---|
 | `xdr-proto` | Generated protobuf and gRPC client for `proto/xdr/v1` (committed; `cargo build -p xdr-proto --features regen` updates it). |
 | `xdr-core` | Platform-independent core: config (reads the Go agent's YAML), identity and enrollment, event bus and normalizer, SQLite queue and policy cache, uploader, heartbeat, mTLS transport. |
-| `xdr-linux` | Linux adapters behind the `Platform` trait: netlink process events, inotify files, /proc/net connections, procfs process identity. |
+| `xdr-linux` | Linux adapters behind the `Platform` trait: netlink process events, inotify files, /proc/net connections, procfs process identity, response actions. |
 | `xdr-agent` | The `xdr-agent-rs` binary. |
 
 Flow: collectors (blocking threads) → `EventSink` → normalizer (envelope,
@@ -111,11 +111,20 @@ directory (`/var/lib/xdr-agent-rs`) and enrollment, so it shows up as a second
 endpoint, with version `<x.y.z>-rs`. Response commands it does not support yet
 are answered with a failure, not left pending.
 
+Since 0.10.0-rs it runs kill, quarantine, restore, isolate, unisolate and
+uninstall (`xdr-linux/src/response.rs`) and keeps the Live stream open with
+`LiveHello{commands: true}`, so commands arrive at once instead of with the
+next heartbeat; commands from both paths are deduplicated by ID. Isolation
+uses its own nftables table, `xdr_rs_isolation`, so it does not clear or
+replace the Go agent's while both run on one host. Remote shells on the Rust
+agent are refused with a `ShellExit` error until the live shell is ported.
+
 Build: `make agent-rs` (Docker, static musl binary in `bin/xdr-agent-rs`) or
 `cd agent-rs && cargo build --release`.
 
-Porting order to parity: eBPF CO-RE collectors (reusing the committed BPF
-objects), YARA scanning and detection content, response actions, prevention
+Porting order to parity: response actions and Live commands (done in
+0.10.0-rs), eBPF CO-RE collectors (reusing the committed BPF objects), YARA
+scanning and detection content, prevention
 modules (fanotify exec/script blocking, application control, FIM, firewall,
 IPS, web reputation, device control including read-only USB), tamper
 protection and the self-protection password, PAM, live shell and activity,

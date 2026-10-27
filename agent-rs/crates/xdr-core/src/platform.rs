@@ -33,4 +33,11 @@ pub trait Platform: Send + Sync + 'static {
     fn resolver(&self) -> Arc<dyn ProcessResolver>;
     fn collectors(&self, cfg: &Config) -> Vec<Box<dyn Collector>>;
     fn usage(&self) -> Usage;
+    /// Runs a response command from the console and returns the result
+    /// message. It blocks, so the core calls it off the async runtime.
+    fn respond(&self, c: &pb::AgentCommand) -> anyhow::Result<String>;
+    /// True while the host's network is isolated by the agent.
+    fn isolated(&self) -> bool;
+    /// Re-applies enforcement that must survive a restart, such as isolation.
+    fn restore(&self);
 }
