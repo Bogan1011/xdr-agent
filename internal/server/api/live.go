@@ -7,10 +7,14 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"time"
 
 	"golang.org/x/net/websocket"
 
+	"github.com/Bogan1011/xdr-agent/internal/server/iam"
 	"github.com/Bogan1011/xdr-agent/internal/server/live"
+	"github.com/Bogan1011/xdr-agent/internal/server/pam"
+	"github.com/Bogan1011/xdr-agent/internal/server/store"
 )
 
 var shellUser = regexp.MustCompile(`^[a-z_][a-z0-9_.-]{0,31}$`)
@@ -18,6 +22,7 @@ var shellUser = regexp.MustCompile(`^[a-z_][a-z0-9_.-]{0,31}$`)
 // WithLive enables remote shells and the live activity view.
 func (a *API) WithLive(h *live.Hub) *API {
 	a.live = h
+	h.Ended = a.shellEnded
 	return a
 }
 
@@ -57,22 +62,36 @@ func (a *API) closeShell(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, err.Error())
 		return
 	}
-	a.log.Info("remote shell closed from the console", "session", s.ID, "hostname", s.Hostname)
+	if u := user(r); s.Admin != u.Username && !iam.Has(u.Permissions, iam.AccessOK) {
+		writeErr(w, http.StatusForbidden, "only the shell's owner or an approver can end it")
+		return
+	}
+	a.log.Info("remote shell closed from the console", "session", s.ID, "hostname", s.Hostname, "by", actor(r))
 	a.live.Close(s)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// openShell upgrades to a WebSocket carrying a terminal on the agent.
+// openShell upgrades to a WebSocket carrying a terminal on the agent. It
+// needs an approved shell access request of the caller's for this agent
+// (?request=), and the shell is closed when the grant expires.
 // Browser to server: JSON text frames {"t":"i","d":"keys"} and
 // {"t":"r","c":cols,"r":rows}. Server to browser: binary frames of terminal
 // output, then a text frame {"t":"exit","msg":"why"}.
 func (a *API) openShell(w http.ResponseWriter, r *http.Request) {
-	id, q := r.PathValue("id"), r.URL.Query()
-	user := q.Get("user")
-	if user == "" {
-		user = "root"
+	id, q, u := r.PathValue("id"), r.URL.Query(), user(r)
+	e, err := a.db.GetElevation(r.Context(), q.Get("request"))
+	if errors.Is(err, store.ErrNotFound) || (err == nil && (e.Kind != pam.Shell || e.AgentID != id || e.RequesterID != u.ID)) {
+		writeErr(w, http.StatusForbidden, "request shell access to this endpoint first")
+		return
 	}
-	if !shellUser.MatchString(user) {
+	if a.fail(w, err) {
+		return
+	}
+	if e.Status != "approved" && e.Status != "active" {
+		writeErr(w, http.StatusForbidden, "the access request is "+e.Status)
+		return
+	}
+	if !shellUser.MatchString(e.Username) {
 		writeErr(w, http.StatusBadRequest, "invalid user name")
 		return
 	}
@@ -86,13 +105,31 @@ func (a *API) openShell(w http.ResponseWriter, r *http.Request) {
 	}
 	cols, _ := strconv.ParseUint(q.Get("cols"), 10, 16)
 	rows, _ := strconv.ParseUint(q.Get("rows"), 10, 16)
+	auth := "password"
+	if u.mfa {
+		auth = "password+totp"
+	}
 	a.socket(w, r, func(ws *websocket.Conn) {
-		s, err := a.live.Open(id, user, a.cfg.AdminUser, uint32(cols), uint32(rows))
+		s, err := a.live.Open(id, e.Username, u.Username, e.ID, uint32(cols), uint32(rows))
 		if err != nil {
 			sendExit(ws, err.Error())
 			return
 		}
-		a.log.Info("remote shell started", "session", s.ID, "hostname", s.Hostname, "user", user, "remote", r.RemoteAddr)
+		_ = a.db.SetElevationStatus(r.Context(), e.ID, []string{"approved"}, "active", "", "")
+		if err := a.db.StartAccessSession(r.Context(), &store.AccessSession{
+			ID: s.ID, UserID: u.ID, Username: u.Username, AgentID: id, Hostname: s.Hostname, Protocol: "browser_shell",
+			Account: e.Username, SourceIP: clientIP(r), UserAgent: truncateStr(r.UserAgent(), 300), AuthMethod: auth,
+			RequestID: e.ID, PolicyName: e.PolicyName, Ticket: e.Ticket, StartedAt: s.Started,
+		}); err != nil {
+			a.log.Error("record privileged session", "session", s.ID, "err", err)
+		}
+		a.audit(r, u.User, "pam.shell.open", "agent:"+id, "ok", map[string]any{"session": s.ID, "account": e.Username, "request": e.ID})
+		a.log.Info("remote shell started", "session", s.ID, "hostname", s.Hostname, "user", e.Username, "by", u.Username, "remote", r.RemoteAddr)
+		expiry := time.AfterFunc(time.Until(e.ExpiresAt), func() {
+			a.log.Info("remote shell access expired", "session", s.ID, "request_id", e.ID)
+			a.live.Close(s)
+		})
+		defer expiry.Stop()
 		go func() {
 			for {
 				var msg string

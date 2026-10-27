@@ -3,9 +3,6 @@
 package api
 
 import (
-	"crypto/rand"
-	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -31,8 +28,9 @@ const (
 )
 
 type Config struct {
-	AdminUser     string
-	AdminPassword string
+	// AdminUser is the break-glass administrator kept from the environment;
+	// the server resets its password from XDR_ADMIN_PASSWORD on start.
+	AdminUser string
 	// PublicHost is the address agents use to reach this server.
 	PublicHost   string
 	EnrollPort   int
@@ -52,12 +50,20 @@ type API struct {
 	log    *slog.Logger
 
 	mu       sync.Mutex
-	sessions map[string]time.Time
+	sessions map[string]*loginSession
+}
+
+// loginSession is a signed-in browser.
+type loginSession struct {
+	userID  string
+	expires time.Time
+	// mfa is true when the login was confirmed with a second factor.
+	mfa bool
 }
 
 func New(cfg Config, db *store.Postgres, events *store.ClickHouse, ca *pki.CA, dep *deploy.Deployer, det *detect.Service, log *slog.Logger) *API {
-	return &API{cfg: cfg, db: db, events: events, ca: ca, deploy: dep, detect: det, log: log, sessions: map[string]time.Time{},
-		live: &live.Hub{Log: log}}
+	a := &API{cfg: cfg, db: db, events: events, ca: ca, deploy: dep, detect: det, log: log, sessions: map[string]*loginSession{}}
+	return a.WithLive(&live.Hub{Log: log})
 }
 
 func (a *API) Handler() http.Handler {
@@ -65,7 +71,7 @@ func (a *API) Handler() http.Handler {
 
 	mux.HandleFunc("POST /api/v1/login", a.login)
 	mux.HandleFunc("POST /api/v1/logout", a.logout)
-	mux.HandleFunc("GET /api/v1/me", a.auth(a.me))
+	a.iamRoutes(mux)
 
 	mux.HandleFunc("GET /api/v1/agents", a.auth(a.listAgents))
 	mux.HandleFunc("GET /api/v1/agents/{id}", a.auth(a.getAgent))
@@ -128,75 +134,6 @@ func spa(dir string) http.Handler {
 }
 
 // --- auth ---
-
-func (a *API) login(w http.ResponseWriter, r *http.Request) {
-	var req struct{ Username, Password string }
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid request")
-		return
-	}
-	userOK := subtle.ConstantTimeCompare([]byte(req.Username), []byte(a.cfg.AdminUser)) == 1
-	passOK := subtle.ConstantTimeCompare([]byte(req.Password), []byte(a.cfg.AdminPassword)) == 1
-	if !userOK || !passOK {
-		a.log.Warn("failed dashboard login", "user", req.Username, "remote", r.RemoteAddr)
-		time.Sleep(500 * time.Millisecond)
-		writeErr(w, http.StatusUnauthorized, "invalid username or password")
-		return
-	}
-	var b [32]byte
-	_, _ = rand.Read(b[:])
-	tok := hex.EncodeToString(b[:])
-	a.mu.Lock()
-	now := time.Now()
-	for k, exp := range a.sessions {
-		if now.After(exp) {
-			delete(a.sessions, k)
-		}
-	}
-	a.sessions[tok] = now.Add(sessionTTL)
-	a.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteStrictMode, Secure: isHTTPS(r), MaxAge: int(sessionTTL.Seconds()),
-	})
-	writeJSON(w, map[string]string{"username": a.cfg.AdminUser})
-}
-
-func (a *API) logout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(sessionCookie); err == nil {
-		a.mu.Lock()
-		delete(a.sessions, c.Value)
-		a.mu.Unlock()
-	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (a *API) me(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]string{"username": a.cfg.AdminUser})
-}
-
-func (a *API) auth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		c, err := r.Cookie(sessionCookie)
-		if err == nil {
-			a.mu.Lock()
-			exp, ok := a.sessions[c.Value]
-			a.mu.Unlock()
-			if ok && time.Now().Before(exp) {
-				// Cookies are SameSite=Strict; requiring JSON on writes also
-				// blocks simple cross-site form posts.
-				if r.Method != http.MethodGet && r.Method != http.MethodDelete && !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-					writeErr(w, http.StatusUnsupportedMediaType, "content type must be application/json")
-					return
-				}
-				next(w, r)
-				return
-			}
-		}
-		writeErr(w, http.StatusUnauthorized, "login required")
-	}
-}
 
 func isHTTPS(r *http.Request) bool {
 	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"

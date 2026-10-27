@@ -112,7 +112,10 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
 	if err := p.migratePrevention(ctx); err != nil {
 		return err
 	}
-	return p.migrateTenancy(ctx)
+	if err := p.migrateTenancy(ctx); err != nil {
+		return err
+	}
+	return p.migrateIAM(ctx)
 }
 
 type Agent struct {

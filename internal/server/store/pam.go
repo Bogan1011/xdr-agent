@@ -81,15 +81,28 @@ type Elevation struct {
 	CreatedAt   time.Time `json:"created_at"`
 	DecidedAt   time.Time `json:"decided_at"`
 	ExpiresAt   time.Time `json:"expires_at"`
+	// Kind is jit_sudo or shell. Username is the local account either way.
+	Kind              string `json:"kind"`
+	RequesterID       string `json:"requester_id"`
+	Ticket            string `json:"ticket"`
+	PolicyID          int64  `json:"policy_id"`
+	PolicyName        string `json:"policy_name"`
+	ApprovalsRequired int    `json:"approvals_required"`
+	Emergency         bool   `json:"emergency"`
+	Incident          string `json:"incident"`
+	// Approvals is filled when requests are listed.
+	Approvals []Approval `json:"approvals"`
 }
 
 const elevationCols = `id, agent_id, hostname, username, uid, reason, duration_seconds, status, requested_by,
-	decided_by, note, command_id, created_at, COALESCE(decided_at, 'epoch'), COALESCE(expires_at, 'epoch')`
+	decided_by, note, command_id, created_at, COALESCE(decided_at, 'epoch'), COALESCE(expires_at, 'epoch'),
+	kind, requester_id, ticket, policy_id, policy_name, approvals_required, emergency, incident`
 
 func scanElevation(row pgx.CollectableRow) (*Elevation, error) {
 	e := &Elevation{}
 	err := row.Scan(&e.ID, &e.AgentID, &e.Hostname, &e.Username, &e.UID, &e.Reason, &e.DurationSeconds, &e.Status,
-		&e.RequestedBy, &e.DecidedBy, &e.Note, &e.CommandID, &e.CreatedAt, &e.DecidedAt, &e.ExpiresAt)
+		&e.RequestedBy, &e.DecidedBy, &e.Note, &e.CommandID, &e.CreatedAt, &e.DecidedAt, &e.ExpiresAt,
+		&e.Kind, &e.RequesterID, &e.Ticket, &e.PolicyID, &e.PolicyName, &e.ApprovalsRequired, &e.Emergency, &e.Incident)
 	return e, err
 }
 
@@ -104,8 +117,16 @@ UPDATE pam_requests SET status='expired', note='nobody decided within 24 hours'
 }
 
 func (p *Postgres) CreateElevation(ctx context.Context, e *Elevation) error {
-	_, err := p.pool.Exec(ctx, `INSERT INTO pam_requests (id, agent_id, hostname, username, uid, reason, duration_seconds, requested_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, e.ID, e.AgentID, e.Hostname, e.Username, e.UID, e.Reason, e.DurationSeconds, e.RequestedBy)
+	if e.Kind == "" {
+		e.Kind = "jit_sudo"
+	}
+	if e.ApprovalsRequired < 1 {
+		e.ApprovalsRequired = 1
+	}
+	_, err := p.pool.Exec(ctx, `INSERT INTO pam_requests (id, agent_id, hostname, username, uid, reason, duration_seconds, requested_by,
+		kind, requester_id, ticket, policy_id, policy_name, approvals_required, incident)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, e.ID, e.AgentID, e.Hostname, e.Username, e.UID, e.Reason,
+		e.DurationSeconds, e.RequestedBy, e.Kind, e.RequesterID, e.Ticket, e.PolicyID, e.PolicyName, e.ApprovalsRequired, e.Incident)
 	return err
 }
 
@@ -130,7 +151,7 @@ func (p *Postgres) PendingElevation(ctx context.Context, agentID, user string) (
 		return nil, err
 	}
 	rows, err := p.pool.Query(ctx, `SELECT `+elevationCols+` FROM pam_requests
-		WHERE agent_id=$1 AND username=$2 AND status='pending' LIMIT 1`, agentID, user)
+		WHERE agent_id=$1 AND username=$2 AND status='pending' AND kind='jit_sudo' AND requester_id='' LIMIT 1`, agentID, user)
 	if err != nil {
 		return nil, err
 	}
@@ -155,10 +176,10 @@ func (p *Postgres) ListElevations(ctx context.Context, agentID, status string, l
 }
 
 // ApproveElevation records the decision and the grant command that carries it.
-func (p *Postgres) ApproveElevation(ctx context.Context, id, by string, duration time.Duration, commandID string) error {
+func (p *Postgres) ApproveElevation(ctx context.Context, id, by string, duration time.Duration, commandID string, emergency bool) error {
 	tag, err := p.pool.Exec(ctx, `UPDATE pam_requests SET status='approved', decided_by=$2, decided_at=now(),
-		duration_seconds=$3, expires_at=now() + $3::bigint * interval '1 second', command_id=$4
-		WHERE id=$1 AND status='pending'`, id, by, int64(duration.Seconds()), commandID)
+		duration_seconds=$3, expires_at=now() + $3::bigint * interval '1 second', command_id=$4, emergency=$5
+		WHERE id=$1 AND status='pending'`, id, by, int64(duration.Seconds()), commandID, emergency)
 	if err == nil && tag.RowsAffected() == 0 {
 		return ErrConflict
 	}
@@ -245,13 +266,19 @@ type Session struct {
 	Output []byte `json:"-"`
 }
 
-func (p *Postgres) SaveSession(ctx context.Context, s *Session) error {
-	_, err := p.pool.Exec(ctx, `INSERT INTO pam_sessions (agent_id, hostname, session_id, username, runas_user, tty, cwd,
+// SaveSession stores a recording and returns its id, or 0 when the agent
+// uploaded it before.
+func (p *Postgres) SaveSession(ctx context.Context, s *Session) (int64, error) {
+	var id int64
+	err := p.pool.QueryRow(ctx, `INSERT INTO pam_sessions (agent_id, hostname, session_id, username, runas_user, tty, cwd,
 		command, started_at, duration_ms, output, truncated, request_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-		ON CONFLICT (agent_id, session_id) DO NOTHING`,
+		ON CONFLICT (agent_id, session_id) DO NOTHING RETURNING id`,
 		s.AgentID, s.Hostname, s.SessionID, s.Username, s.RunasUser, s.TTY, s.Cwd, s.Command, s.StartedAt,
-		s.DurationMs, s.Output, s.Truncated, s.RequestID)
-	return err
+		s.DurationMs, s.Output, s.Truncated, s.RequestID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	return id, err
 }
 
 const sessionCols = `id, agent_id, hostname, session_id, username, runas_user, tty, cwd, command, started_at,

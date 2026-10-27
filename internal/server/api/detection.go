@@ -158,7 +158,7 @@ func (a *API) createCommand(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	c := &store.Command{AgentID: ag.ID, Type: req.Type, Args: req.Args, AlertID: req.AlertID, RequestedBy: a.cfg.AdminUser}
+	c := &store.Command{AgentID: ag.ID, Type: req.Type, Args: req.Args, AlertID: req.AlertID, RequestedBy: actor(r)}
 	if a.fail(w, a.detect.QueueCommand(r.Context(), c)) {
 		return
 	}

@@ -236,7 +236,26 @@ export interface InstallInfo {
   base_url: string;
 }
 
-export type ElevationStatus = "pending" | "approved" | "active" | "denied" | "expired" | "revoked" | "failed";
+export type ElevationStatus =
+  | "pending"
+  | "approved"
+  | "active"
+  | "denied"
+  | "expired"
+  | "revoked"
+  | "failed"
+  | "cancelled";
+
+export type AccessKind = "shell" | "jit_sudo";
+
+export interface Approval {
+  request_id: string;
+  approver: string;
+  decision: "approve" | "deny";
+  note: string;
+  emergency: boolean;
+  at: string;
+}
 
 export interface Elevation {
   id: string;
@@ -253,6 +272,128 @@ export interface Elevation {
   created_at: string;
   decided_at: string;
   expires_at: string;
+  kind: AccessKind;
+  requester_id: string;
+  ticket: string;
+  policy_name: string;
+  approvals_required: number;
+  emergency: boolean;
+  incident: string;
+  approvals?: Approval[];
+}
+
+export interface Me {
+  id: string;
+  username: string;
+  display_name: string;
+  role_id: string;
+  permissions: string[];
+  mfa_enabled: boolean;
+  builtin: boolean;
+}
+
+export function can(me: Me | null | undefined, perm: string) {
+  return !!me && (me.permissions.includes("*") || me.permissions.includes(perm));
+}
+
+export interface ConsoleUser {
+  id: string;
+  username: string;
+  display_name: string;
+  email: string;
+  role_id: string;
+  builtin: boolean;
+  disabled: boolean;
+  mfa_enabled: boolean;
+  created_at: string;
+  last_login: string;
+}
+
+export interface Role {
+  id: string;
+  name: string;
+  description: string;
+  permissions: string[];
+  builtin: boolean;
+}
+
+export interface AssetGroup {
+  id: number;
+  name: string;
+  description: string;
+  criticality: "low" | "medium" | "high" | "critical";
+  environment: "production" | "staging" | "development" | "other";
+  all_assets: boolean;
+  agent_ids: string[];
+}
+
+export interface AccessPolicy {
+  id: number;
+  name: string;
+  description: string;
+  enabled: boolean;
+  priority: number;
+  effect: "allow" | "deny";
+  subject_roles: string[];
+  subject_users: string[];
+  asset_groups: number[];
+  access_types: AccessKind[];
+  accounts: string[];
+  require_approval: boolean;
+  approvals: number;
+  require_mfa: boolean;
+  require_ticket: boolean;
+  max_minutes: number;
+  hours_from: number;
+  hours_to: number;
+  incident_mode: "none" | "require_approval" | "deny";
+}
+
+export interface AccessDecision {
+  allowed: boolean;
+  policy_id: number;
+  policy_name: string;
+  require_approval: boolean;
+  approvals: number;
+  require_mfa: boolean;
+  require_ticket: boolean;
+  require_reason: boolean;
+  max_minutes: number;
+  reasons: string[];
+}
+
+export interface AccessSession {
+  id: string;
+  user_id: string;
+  username: string;
+  agent_id: string;
+  hostname: string;
+  protocol: "browser_shell" | "sudo";
+  account: string;
+  source_ip: string;
+  user_agent: string;
+  auth_method: string;
+  request_id: string;
+  policy_name: string;
+  ticket: string;
+  recording_id: number;
+  started_at: string;
+  ended_at: string;
+  end_reason: string;
+  risk_score: number;
+  risk_reasons: string[];
+}
+
+export interface AuditEntry {
+  id: number;
+  at: string;
+  actor: string;
+  action: string;
+  target: string;
+  outcome: string;
+  remote: string;
+  detail: Record<string, unknown>;
+  hash: string;
 }
 
 export interface PrivilegedAccount {
@@ -368,7 +509,11 @@ export interface PolicyDetail {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+    public data: Record<string, unknown> = {},
+  ) {
     super(message);
   }
 }
@@ -385,12 +530,14 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
   if (!res.ok) {
     let msg = res.statusText;
+    let data: Record<string, unknown> = {};
     try {
-      msg = (await res.json()).error ?? msg;
+      data = await res.json();
+      msg = (data.error as string) ?? msg;
     } catch {
       // keep statusText
     }
-    throw new ApiError(res.status, msg);
+    throw new ApiError(res.status, msg, data);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -406,10 +553,64 @@ export interface EventFilter {
 }
 
 export const api = {
-  login: (username: string, password: string) =>
-    request<{ username: string }>("POST", "/api/v1/login", { username, password }),
+  login: (username: string, password: string, code = "") =>
+    request<{ username: string }>("POST", "/api/v1/login", { username, password, code }),
   logout: () => request<void>("POST", "/api/v1/logout", {}),
-  me: () => request<{ username: string }>("GET", "/api/v1/me"),
+  me: () => request<Me>("GET", "/api/v1/me"),
+  changePassword: (current: string, next: string) => request<void>("POST", "/api/v1/me/password", { current, new: next }),
+  mfaSetup: () => request<{ secret: string; uri: string }>("POST", "/api/v1/me/mfa/setup", {}),
+  mfaEnable: (code: string) => request<void>("POST", "/api/v1/me/mfa/enable", { code }),
+  mfaDisable: (code: string) => request<void>("POST", "/api/v1/me/mfa/disable", { code }),
+  users: () => request<ConsoleUser[]>("GET", "/api/v1/users"),
+  createUser: (u: { username: string; display_name: string; email: string; role_id: string; password: string }) =>
+    request<{ id: string }>("POST", "/api/v1/users", u),
+  updateUser: (id: string, u: { display_name: string; email: string; role_id: string; disabled: boolean; password?: string }) =>
+    request<void>("PUT", `/api/v1/users/${encodeURIComponent(id)}`, u),
+  deleteUser: (id: string) => request<void>("DELETE", `/api/v1/users/${encodeURIComponent(id)}`),
+  resetUserMFA: (id: string) => request<void>("POST", `/api/v1/users/${encodeURIComponent(id)}/mfa/reset`, {}),
+  roles: () => request<{ roles: Role[]; permissions: { id: string; label: string }[] }>("GET", "/api/v1/roles"),
+  saveRole: (r: Omit<Role, "builtin">, isNew: boolean) =>
+    request<void>(isNew ? "POST" : "PUT", isNew ? "/api/v1/roles" : `/api/v1/roles/${encodeURIComponent(r.id)}`, r),
+  deleteRole: (id: string) => request<void>("DELETE", `/api/v1/roles/${encodeURIComponent(id)}`),
+  assetGroups: () => request<AssetGroup[]>("GET", "/api/v1/asset-groups"),
+  saveAssetGroup: (g: AssetGroup) =>
+    request<{ id: number }>(g.id ? "PUT" : "POST", g.id ? `/api/v1/asset-groups/${g.id}` : "/api/v1/asset-groups", g),
+  deleteAssetGroup: (id: number) => request<void>("DELETE", `/api/v1/asset-groups/${id}`),
+  accessPolicies: () => request<AccessPolicy[]>("GET", "/api/v1/access-policies"),
+  saveAccessPolicy: (p: AccessPolicy) =>
+    request<{ id: number }>(p.id ? "PUT" : "POST", p.id ? `/api/v1/access-policies/${p.id}` : "/api/v1/access-policies", p),
+  deleteAccessPolicy: (id: number) => request<void>("DELETE", `/api/v1/access-policies/${id}`),
+  audit: (q = "") => request<AuditEntry[]>("GET", `/api/v1/audit${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  verifyAudit: () => request<{ ok: boolean; checked: number; broken_at: number }>("GET", "/api/v1/audit/verify"),
+  previewAccess: (agentId: string, kind: AccessKind, account: string) =>
+    request<{ decision: AccessDecision; incident: string; mfa_enabled: boolean }>(
+      "GET",
+      `/api/v1/pam/access/preview?agent_id=${encodeURIComponent(agentId)}&kind=${kind}&account=${encodeURIComponent(account)}`,
+    ),
+  requestAccess: (r: {
+    agent_id: string;
+    kind: AccessKind;
+    account: string;
+    reason: string;
+    ticket: string;
+    duration_minutes: number;
+    mfa_code: string;
+  }) => request<{ request: Elevation; decision: AccessDecision }>("POST", "/api/v1/pam/access", r),
+  cancelElevation: (id: string) => request<void>("POST", `/api/v1/pam/requests/${encodeURIComponent(id)}/cancel`, {}),
+  accessSessions: (agentId = "") =>
+    request<AccessSession[]>(
+      "GET",
+      `/api/v1/pam/access-sessions${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ""}`,
+    ),
+  accessSession: (id: string) =>
+    request<{
+      session: AccessSession;
+      request?: Elevation;
+      approvals?: Approval[];
+      alerts: Alert[];
+      events: XdrEvent[];
+      events_error?: string;
+    }>("GET", `/api/v1/pam/access-sessions/${encodeURIComponent(id)}`),
   agents: () => request<Agent[]>("GET", "/api/v1/agents"),
   agent: (id: string) => request<Agent>("GET", `/api/v1/agents/${encodeURIComponent(id)}`),
   revokeAgent: (id: string) => request<void>("POST", `/api/v1/agents/${encodeURIComponent(id)}/revoke`, {}),
@@ -481,13 +682,23 @@ export const api = {
   elevations: (agentId = "") =>
     request<Elevation[]>("GET", `/api/v1/pam/requests${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ""}`),
   pamSummary: () => request<{ pending: number }>("GET", "/api/v1/pam/summary"),
-  approveElevation: (id: string, duration_minutes: number) =>
-    request<void>("POST", `/api/v1/pam/requests/${encodeURIComponent(id)}/approve`, { duration_minutes }),
+  approveElevation: (id: string, duration_minutes: number, note = "", emergency = false) =>
+    request<{ status: string; approvals: number; required: number }>(
+      "POST",
+      `/api/v1/pam/requests/${encodeURIComponent(id)}/approve`,
+      { duration_minutes, note, emergency },
+    ),
   denyElevation: (id: string, note: string) =>
     request<void>("POST", `/api/v1/pam/requests/${encodeURIComponent(id)}/deny`, { note }),
   revokeElevation: (id: string) => request<void>("POST", `/api/v1/pam/requests/${encodeURIComponent(id)}/revoke`, {}),
-  grantElevation: (agentId: string, user: string, duration_minutes: number, reason: string) =>
-    request<{ id: string }>("POST", `/api/v1/agents/${encodeURIComponent(agentId)}/pam/grant`, { user, duration_minutes, reason }),
+  grantElevation: (agentId: string, user: string, duration_minutes: number, reason: string, ticket = "", mfa_code = "") =>
+    request<{ id: string; status: string }>("POST", `/api/v1/agents/${encodeURIComponent(agentId)}/pam/grant`, {
+      user,
+      duration_minutes,
+      reason,
+      ticket,
+      mfa_code,
+    }),
   setPamRecording: (agentId: string, enabled: boolean) =>
     request<void>("POST", `/api/v1/agents/${encodeURIComponent(agentId)}/pam/recording`, { enabled }),
   privilegedAccounts: () => request<Inventory[]>("GET", "/api/v1/pam/accounts"),
@@ -551,6 +762,7 @@ export interface RemoteShell {
   hostname: string;
   user: string;
   admin: string;
+  request_id: string;
   started_at: string;
   viewers: number;
 }
