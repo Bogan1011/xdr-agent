@@ -1,13 +1,16 @@
 # Single-VM deployment: the console, its databases, and the endpoints for agents.
 # Usage: cp .env.example .env, edit it, then `docker compose up -d --build`.
+# Detection runs inside the server. To run it as its own container instead,
+# set XDR_DETECT_URL and XDR_DETECT_TOKEN in .env and add `--profile detect`.
 name: xdr
 
 services:
   server:
+    image: xdr-server:local
     build:
       context: ..
       args:
-        VERSION: ${XDR_VERSION:-0.8.1}
+        VERSION: ${XDR_VERSION:-0.9.1}
     restart: unless-stopped
     depends_on: [postgres, clickhouse]
     environment:
@@ -21,12 +24,25 @@ services:
       XDR_CLICKHOUSE_USER: xdr
       XDR_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD}
       XDR_EVENT_TTL_DAYS: ${XDR_EVENT_TTL_DAYS:-30}
+      XDR_DETECT_URL: ${XDR_DETECT_URL:-}
+      XDR_DETECT_TOKEN: ${XDR_DETECT_TOKEN:-}
     ports:
       - "${XDR_HTTP_PORT:-8080}:8080"   # dashboard, API, installer downloads
       - "8443:8443"                     # agent enrollment (TLS)
       - "8444:8444"                     # agent telemetry (mutual TLS)
     volumes:
       - server-data:/data
+
+  # Optional: detection and correlation as a separate service.
+  detect:
+    image: xdr-server:local
+    profiles: [detect]
+    entrypoint: ["/usr/local/bin/xdr-detect"]
+    restart: unless-stopped
+    depends_on: [postgres, server]
+    environment:
+      XDR_POSTGRES_URL: postgres://xdr:${POSTGRES_PASSWORD}@postgres:5432/xdr
+      XDR_DETECT_TOKEN: ${XDR_DETECT_TOKEN:-}
 
   postgres:
     image: postgres:17-alpine

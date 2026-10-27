@@ -1,4 +1,4 @@
-VERSION ?= 0.8.1
+VERSION ?= 0.9.1
 LDFLAGS := -s -w -X github.com/Bogan1011/xdr-agent/internal/agent.Version=$(VERSION)
 
 .PHONY: all agent agent-rs server web proto bpf test up down
@@ -15,6 +15,7 @@ agent-rs:
 
 server:
 	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o bin/xdr-server ./cmd/xdr-server
+	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o bin/xdr-detect ./cmd/xdr-detect
 
 web:
 	cd web && npm ci && npm run build

@@ -67,7 +67,7 @@ func New(cfg *Config, log *slog.Logger) *Agent {
 	a.tamper = newTamper(cfg, log.With("component", "tamper"), a.tamperEvent)
 	a.pam = newPAM(cfg, log.With("component", "pam"))
 	a.prev = newPrevention(a, log.With("component", "prevention"))
-	a.live = newLive(cfg, log.With("component", "live"))
+	a.live = newLive(cfg, log.With("component", "live"), a.runCommand)
 	a.ctx, a.cancel = context.WithCancel(context.Background())
 	return a
 }

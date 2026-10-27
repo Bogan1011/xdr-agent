@@ -51,7 +51,7 @@ export interface Alert {
   hostname: string;
   rule_id: string;
   rule_name: string;
-  kind: "sigma" | "ioc" | "yara" | "pam";
+  kind: "sigma" | "ioc" | "yara" | "pam" | "correlation";
   severity: Severity;
   tags: string[];
   detail: string;
@@ -61,6 +61,8 @@ export interface Alert {
   note: string;
   first_seen: string;
   last_seen: string;
+  process_guid: string;
+  storyline_guid: string;
 }
 
 export interface AlertSummary {
@@ -175,6 +177,37 @@ export interface XdrEvent {
   local_port: number;
   remote_addr: string;
   remote_port: number;
+  process_guid?: string;
+  parent_process_guid?: string;
+  storyline_guid?: string;
+}
+
+export interface StoryNode {
+  guid: string;
+  parent_guid: string;
+  depth: number;
+  pid: number;
+  ppid: number;
+  exe: string;
+  args: string;
+  user: string;
+  sha256: string;
+  started: string;
+  images?: string[];
+  exited: boolean;
+  exit_code: number;
+  counts: Record<string, number>;
+  known: boolean;
+}
+
+export interface Storyline {
+  agent_id: string;
+  root: string;
+  focus: string;
+  session?: StoryNode;
+  nodes: StoryNode[];
+  events: XdrEvent[];
+  truncated: boolean;
 }
 
 export interface Stats {
@@ -414,6 +447,11 @@ export const api = {
   },
   alertSummary: () => request<AlertSummary>("GET", "/api/v1/alerts/summary"),
   alert: (id: number) => request<{ alert: Alert; commands: Command[] }>("GET", `/api/v1/alerts/${id}`),
+  storyline: (agentId: string, guid: string) =>
+    request<{ storyline: Storyline; alerts: Alert[] }>(
+      "GET",
+      `/api/v1/storyline?agent_id=${encodeURIComponent(agentId)}&guid=${encodeURIComponent(guid)}`,
+    ),
   updateAlert: (id: number, status: AlertStatus, note = "") =>
     request<void>("PATCH", `/api/v1/alerts/${id}`, { status, note }),
   commands: (agentId: string) => request<Command[]>("GET", `/api/v1/agents/${encodeURIComponent(agentId)}/commands`),

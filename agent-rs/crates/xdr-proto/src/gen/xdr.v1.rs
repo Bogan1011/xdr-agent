@@ -760,15 +760,15 @@ pub struct SessionRecording {
 pub struct SessionRecordingAck {}
 /// Console to agent, on the live stream.
 #[allow(clippy::all)]
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct LiveDown {
-    #[prost(oneof = "live_down::Msg", tags = "1, 2, 3, 4, 5")]
+    #[prost(oneof = "live_down::Msg", tags = "1, 2, 3, 4, 5, 6")]
     pub msg: ::core::option::Option<live_down::Msg>,
 }
 /// Nested message and enum types in `LiveDown`.
 pub mod live_down {
     #[allow(clippy::all)]
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Msg {
         #[prost(message, tag = "1")]
         ShellOpen(super::ShellOpen),
@@ -780,13 +780,18 @@ pub mod live_down {
         ShellClose(super::ShellClose),
         #[prost(message, tag = "5")]
         Activity(super::ActivityRequest),
+        /// A response command, pushed the moment it is queued. Only sent to agents
+        /// whose LiveHello says they take commands here; the others get it with
+        /// their next heartbeat.
+        #[prost(message, tag = "6")]
+        Command(super::AgentCommand),
     }
 }
 /// Agent to console, on the live stream.
 #[allow(clippy::all)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct LiveUp {
-    #[prost(oneof = "live_up::Msg", tags = "1, 2, 3")]
+    #[prost(oneof = "live_up::Msg", tags = "1, 2, 3, 4")]
     pub msg: ::core::option::Option<live_up::Msg>,
 }
 /// Nested message and enum types in `LiveUp`.
@@ -800,7 +805,18 @@ pub mod live_up {
         ShellExit(super::ShellExit),
         #[prost(message, tag = "3")]
         Activity(super::Activity),
+        #[prost(message, tag = "4")]
+        Hello(super::LiveHello),
     }
+}
+/// The first message an agent sends on a new live stream.
+#[allow(clippy::all)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LiveHello {
+    /// The agent runs AgentCommands pushed on this stream and reports them with
+    /// ReportCommandResult, as it does for heartbeat commands.
+    #[prost(bool, tag = "1")]
+    pub commands: bool,
 }
 /// Start a login shell for user on a new pseudo-terminal.
 #[allow(clippy::all)]

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	xdrv1 "github.com/Bogan1011/xdr-agent/gen/xdr/v1"
@@ -21,7 +22,38 @@ systemctl daemon-reload
 rm -f /usr/local/bin/xdr-agent /etc/sudoers.d/xdr-jit-* /etc/sudoers.d/xdr-session-recording
 rm -rf /etc/xdr-agent /var/lib/xdr-agent /run/xdr-agent`
 
+// recentCommands is how many command IDs the agent remembers, so a command
+// delivered both on the live stream and with a heartbeat runs once.
+const recentCommands = 256
+
+var (
+	ranMu sync.Mutex
+	ran   = map[string]int{}
+	ranN  int
+)
+
+// firstRun records a command ID and reports whether it is new.
+func firstRun(id string) bool {
+	ranMu.Lock()
+	defer ranMu.Unlock()
+	if _, ok := ran[id]; ok {
+		return false
+	}
+	ranN++
+	ran[id] = ranN
+	for k, n := range ran {
+		if n <= ranN-recentCommands {
+			delete(ran, k)
+		}
+	}
+	return true
+}
+
 func (a *Agent) runCommand(ctx context.Context, c *xdrv1.AgentCommand) {
+	if c.Id != "" && !firstRun(c.Id) {
+		a.log.Info("ignoring a command that already ran", "command_id", c.Id)
+		return
+	}
 	switch c.Type {
 	case xdrv1.CommandType_COMMAND_TYPE_UNINSTALL:
 		a.log.Warn("uninstall requested by the console", "command_id", c.Id)

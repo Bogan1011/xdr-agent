@@ -572,6 +572,10 @@ message LiveDown {
     ShellResize shell_resize = 3;
     ShellClose shell_close = 4;
     ActivityRequest activity = 5;
+    // A response command, pushed the moment it is queued. Only sent to agents
+    // whose LiveHello says they take commands here; the others get it with
+    // their next heartbeat.
+    AgentCommand command = 6;
   }
 }
 
@@ -581,7 +585,15 @@ message LiveUp {
     ShellData shell_output = 1;
     ShellExit shell_exit = 2;
     Activity activity = 3;
+    LiveHello hello = 4;
   }
+}
+
+// The first message an agent sends on a new live stream.
+message LiveHello {
+  // The agent runs AgentCommands pushed on this stream and reports them with
+  // ReportCommandResult, as it does for heartbeat commands.
+  bool commands = 1;
 }
 
 // Start a login shell for user on a new pseudo-terminal.

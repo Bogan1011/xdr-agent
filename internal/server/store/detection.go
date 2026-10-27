@@ -68,6 +68,9 @@ CREATE TABLE IF NOT EXISTS alerts (
 CREATE UNIQUE INDEX IF NOT EXISTS alerts_open_dedupe ON alerts (agent_id, rule_id, dedupe_key)
 	WHERE status IN ('new', 'in_progress');
 CREATE INDEX IF NOT EXISTS alerts_last_seen ON alerts (last_seen DESC);
+ALTER TABLE alerts ADD COLUMN IF NOT EXISTS process_guid TEXT NOT NULL DEFAULT '';
+ALTER TABLE alerts ADD COLUMN IF NOT EXISTS storyline_guid TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS alerts_storyline ON alerts (agent_id, storyline_guid) WHERE storyline_guid <> '';
 CREATE TABLE IF NOT EXISTS commands (
 	id          TEXT PRIMARY KEY,
 	agent_id    TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -332,6 +335,9 @@ type Alert struct {
 	Note      string          `json:"note"`
 	FirstSeen time.Time       `json:"first_seen"`
 	LastSeen  time.Time       `json:"last_seen"`
+	// The process that triggered the alert and the process tree it belongs to.
+	ProcessGUID   string `json:"process_guid"`
+	StorylineGUID string `json:"storyline_guid"`
 }
 
 // AlertStatuses are the states an analyst moves an alert through.
@@ -342,12 +348,14 @@ var AlertStatuses = []string{"new", "in_progress", "resolved", "false_positive"}
 func (p *Postgres) RaiseAlert(ctx context.Context, a *Alert, dedupeKey string) (int64, bool, error) {
 	var id int64
 	var inserted bool
-	err := p.pool.QueryRow(ctx, `INSERT INTO alerts (agent_id, hostname, rule_id, rule_name, kind, severity, tags, detail, dedupe_key, event)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+	err := p.pool.QueryRow(ctx, `INSERT INTO alerts (agent_id, hostname, rule_id, rule_name, kind, severity, tags, detail, dedupe_key, event,
+		process_guid, storyline_guid)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		ON CONFLICT (agent_id, rule_id, dedupe_key) WHERE status IN ('new', 'in_progress')
 		DO UPDATE SET count = alerts.count + 1, last_seen = now(), event = EXCLUDED.event
 		RETURNING id, xmax = 0`,
-		a.AgentID, a.Hostname, a.RuleID, a.RuleName, a.Kind, a.Severity, nonNil(a.Tags), a.Detail, dedupeKey, a.Event).Scan(&id, &inserted)
+		a.AgentID, a.Hostname, a.RuleID, a.RuleName, a.Kind, a.Severity, nonNil(a.Tags), a.Detail, dedupeKey, a.Event,
+		a.ProcessGUID, a.StorylineGUID).Scan(&id, &inserted)
 	return id, inserted, err
 }
 
@@ -358,12 +366,13 @@ type AlertQuery struct {
 	Limit    int
 }
 
-const alertCols = `id, agent_id, hostname, rule_id, rule_name, kind, severity, tags, detail, status, count, event, note, first_seen, last_seen`
+const alertCols = `id, agent_id, hostname, rule_id, rule_name, kind, severity, tags, detail, status, count, event, note, first_seen, last_seen,
+	process_guid, storyline_guid`
 
 func scanAlert(row pgx.CollectableRow) (*Alert, error) {
 	a := &Alert{}
 	err := row.Scan(&a.ID, &a.AgentID, &a.Hostname, &a.RuleID, &a.RuleName, &a.Kind, &a.Severity, &a.Tags, &a.Detail,
-		&a.Status, &a.Count, &a.Event, &a.Note, &a.FirstSeen, &a.LastSeen)
+		&a.Status, &a.Count, &a.Event, &a.Note, &a.FirstSeen, &a.LastSeen, &a.ProcessGUID, &a.StorylineGUID)
 	return a, err
 }
 
@@ -389,6 +398,28 @@ func (p *Postgres) GetAlert(ctx context.Context, id int64) (*Alert, error) {
 		return nil, ErrNotFound
 	}
 	return a, err
+}
+
+// StorylineDetections lists the distinct rules with open alerts in one
+// storyline, leaving out correlation alerts.
+func (p *Postgres) StorylineDetections(ctx context.Context, agentID, storyline string) ([]string, error) {
+	rows, err := p.pool.Query(ctx, `SELECT DISTINCT rule_name FROM alerts WHERE agent_id=$1 AND storyline_guid=$2
+		AND kind <> 'correlation' AND status IN ('new', 'in_progress') ORDER BY 1`, agentID, storyline)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+// ProcessAlerts returns the alerts raised on the given processes or
+// storylines of one agent, newest first.
+func (p *Postgres) ProcessAlerts(ctx context.Context, agentID string, guids []string) ([]*Alert, error) {
+	rows, err := p.pool.Query(ctx, `SELECT `+alertCols+` FROM alerts WHERE agent_id=$1
+		AND (process_guid = ANY($2) OR storyline_guid = ANY($2)) ORDER BY last_seen DESC LIMIT 200`, agentID, guids)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, scanAlert)
 }
 
 func (p *Postgres) UpdateAlert(ctx context.Context, id int64, status, note string) error {
@@ -469,6 +500,21 @@ func (p *Postgres) TakeCommands(ctx context.Context, agentID string) ([]*Command
 		return nil, err
 	}
 	return pgx.CollectRows(rows, scanCommand)
+}
+
+// RequeueCommand returns a command that could not be delivered to pending.
+func (p *Postgres) RequeueCommand(ctx context.Context, id string) error {
+	_, err := p.pool.Exec(ctx, `UPDATE commands SET status='pending', sent_at=NULL WHERE id=$1 AND status='sent'`, id)
+	return err
+}
+
+// PendingCommandAgents lists the agents that have commands waiting.
+func (p *Postgres) PendingCommandAgents(ctx context.Context) ([]string, error) {
+	rows, err := p.pool.Query(ctx, `SELECT DISTINCT agent_id FROM commands WHERE status='pending'`)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 // FinishCommand records an agent's result for one of its own commands.
