@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -27,7 +28,9 @@ const (
 )
 
 // DeviceControl blocks USB mass storage by deauthorizing the device in sysfs,
-// which detaches its drivers before a disk appears. New devices are seen
+// which detaches its drivers before a disk appears. In read-only mode it
+// lets the disk appear, marks its block devices read-only (BLKROSET) and
+// remounts any filesystem already mounted from them read-only. New devices are seen
 // through kernel uevents; a periodic rescan catches anything missed. Devices
 // it blocked are kept on disk so they are released when the policy allows
 // them again, even after a restart.
@@ -37,11 +40,15 @@ type DeviceControl struct {
 	File string
 	Root string // sysfs USB devices directory; tests point it elsewhere
 	kick chan struct{}
+	// SetReadOnly marks a block device (e.g. sdb1) read-only or writable;
+	// tests replace it.
+	SetReadOnly func(dev string, ro bool) error
 
 	mu      sync.Mutex
 	pol     *xdrv1.DeviceControlPolicy
 	blocked map[string]usbDevice // sysfs name to the device we deauthorized
 	seen    map[string]bool      // storage devices already reported
+	ro      map[string]bool      // block devices we made read-only
 }
 
 type usbDevice struct {
@@ -66,7 +73,7 @@ func (d usbDevice) String() string {
 
 func NewDeviceControl(log *slog.Logger, emit collector.Emit, file string) *DeviceControl {
 	d := &DeviceControl{Log: log, Emit: emit, File: file, Root: usbDevices, kick: make(chan struct{}, 1),
-		blocked: map[string]usbDevice{}, seen: map[string]bool{}}
+		blocked: map[string]usbDevice{}, seen: map[string]bool{}, ro: map[string]bool{}, SetReadOnly: setBlockReadOnly}
 	if raw, err := os.ReadFile(file); err == nil {
 		_ = json.Unmarshal(raw, &d.blocked)
 	}
@@ -135,7 +142,8 @@ func (d *DeviceControl) uevents(ctx context.Context) {
 			return
 		}
 		msg := buf[:n]
-		if bytes.HasPrefix(msg, []byte("add@")) && bytes.Contains(msg, []byte("SUBSYSTEM=usb")) {
+		// Disks show up as block devices a moment after the USB device.
+		if bytes.HasPrefix(msg, []byte("add@")) && (bytes.Contains(msg, []byte("SUBSYSTEM=usb")) || bytes.Contains(msg, []byte("SUBSYSTEM=block"))) {
 			d.trigger()
 		}
 	}
@@ -193,6 +201,7 @@ func (d *DeviceControl) scan() {
 	pol := d.pol
 	enabled := pol.GetEnabled()
 	block := enabled && pol.GetUsbStorage() == policy.USBStorageBlock
+	readOnly := enabled && pol.GetUsbStorage() == policy.USBStorageReadOnly
 	allowed := map[string]bool{}
 	for _, id := range pol.GetAllowedDevices() {
 		allowed[id] = true
@@ -217,8 +226,30 @@ func (d *DeviceControl) scan() {
 	}
 
 	present := d.storageDevices()
+	wantRO := map[string]bool{}
 	for name, dev := range present {
 		if _, ok := d.blocked[name]; ok {
+			continue
+		}
+		if readOnly && !allowed[dev.ID] {
+			disks := d.blockDevices(name)
+			fresh := false
+			for _, b := range disks {
+				wantRO[b] = true
+				if d.ro[b] {
+					continue
+				}
+				if err := d.SetReadOnly(b, true); err != nil {
+					d.Log.Error("making USB storage read-only failed", "device", dev.String(), "disk", b, "err", err)
+					continue
+				}
+				d.ro[b], fresh = true, true
+			}
+			if fresh && !d.seen[dev.key()] {
+				d.seen[dev.key()] = true
+				d.Log.Warn("USB storage device made read-only", "device", dev.String(), "disks", disks)
+				d.emit("read_only", dev)
+			}
 			continue
 		}
 		if block && !allowed[dev.ID] {
@@ -241,6 +272,16 @@ func (d *DeviceControl) scan() {
 			d.emit("connected", dev)
 		}
 	}
+	// Make writable again what is unplugged or no longer read-only.
+	for b := range d.ro {
+		if wantRO[b] {
+			continue
+		}
+		if d.SetReadOnly != nil {
+			_ = d.SetReadOnly(b, false)
+		}
+		delete(d.ro, b)
+	}
 	for k := range d.seen {
 		name, _, _ := strings.Cut(k, "|")
 		_, here := present[name]
@@ -253,6 +294,50 @@ func (d *DeviceControl) scan() {
 		raw, _ := json.Marshal(d.blocked)
 		_ = os.WriteFile(d.File, raw, 0o600)
 	}
+}
+
+// blockDevices lists the disks and partitions (sdb, sdb1...) under a USB
+// storage device.
+func (d *DeviceControl) blockDevices(name string) []string {
+	var out []string
+	disks, _ := filepath.Glob(filepath.Join(d.Root, name, name+":*", "host*", "target*", "*", "block", "*"))
+	for _, disk := range disks {
+		out = append(out, filepath.Base(disk))
+		parts, _ := filepath.Glob(filepath.Join(disk, filepath.Base(disk)+"*"))
+		for _, p := range parts {
+			out = append(out, filepath.Base(p))
+		}
+	}
+	return out
+}
+
+// setBlockReadOnly sets the kernel's read-only flag on /dev/<dev> and, when
+// making it read-only, remounts filesystems already mounted from it.
+func setBlockReadOnly(dev string, ro bool) error {
+	f, err := os.OpenFile("/dev/"+dev, os.O_RDONLY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	v := 0
+	if ro {
+		v = 1
+	}
+	err = unix.IoctlSetPointerInt(int(f.Fd()), unix.BLKROSET, v)
+	f.Close()
+	if err != nil || !ro {
+		return err
+	}
+	raw, _ := os.ReadFile("/proc/self/mounts")
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "/dev/"+dev {
+			continue
+		}
+		if out, err := exec.Command("mount", "-o", "remount,ro", unescapeMount(fields[1])).CombinedOutput(); err != nil {
+			return fmt.Errorf("remount %s read-only: %v: %s", fields[1], err, strings.TrimSpace(string(out)))
+		}
+	}
+	return nil
 }
 
 func (d *DeviceControl) emit(action string, dev usbDevice) {

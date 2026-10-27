@@ -274,6 +274,8 @@ with `cd web && npm run dev` (it proxies `/api` to `:8080`).
    application control.
 7. **Lockdown** (0.7.0): application control allow-list mode and blocking
    of scripts run by shells and interpreters from temp folders.
+   0.8.1 adds read-only USB storage and a policy Self-protection module
+   with an admin-set password (`xdr-agent maintenance --password ...`).
 8. **Architecture foundation** (0.8.0): canonical SecurityEvent v1 with a
    stable `process_guid` and parent context on every event, event priority,
    tenant_id and policy versions in the data model. See
@@ -285,5 +287,6 @@ with `cd web && npm run dev` (it proxies `/api` to `:8080`).
    the console, correlation of several detections in one storyline into a
    critical alert, and response commands pushed to agents over the live
    stream instead of waiting for the heartbeat.
-10. Rust agent feature parity, the remaining Linux gaps, then the Windows
+10. **Read-only USB and agent password** (0.9.1): from PR #11, on top of 0.9.0.
+11. Rust agent feature parity, the remaining Linux gaps, then the Windows
     agent.

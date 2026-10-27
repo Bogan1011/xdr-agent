@@ -123,6 +123,25 @@ pub struct PreventionPolicy {
     /// Bumped on every change to the policy in the console.
     #[prost(int64, tag = "11")]
     pub version: i64,
+    #[prost(message, optional, tag = "12")]
+    pub self_protection: ::core::option::Option<SelfProtectionPolicy>,
+}
+/// Deep Security-style agent self-protection set for every endpoint in a
+/// policy: tamper protection on, unlocked locally with an admin password.
+#[allow(clippy::all)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SelfProtectionPolicy {
+    /// Turn tamper protection on, in addition to the per-endpoint switch.
+    #[prost(bool, tag = "1")]
+    pub enabled: bool,
+    /// Console input only: the server hashes it and stores salt and hash.
+    #[prost(string, tag = "2")]
+    pub new_password: ::prost::alloc::string::String,
+    /// PBKDF2-SHA256 of the password, hex.
+    #[prost(string, tag = "3")]
+    pub password_salt: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub password_hash: ::prost::alloc::string::String,
 }
 #[allow(clippy::all)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -179,7 +198,7 @@ pub struct IntrusionPreventionPolicy {
 pub struct DeviceControlPolicy {
     #[prost(bool, tag = "1")]
     pub enabled: bool,
-    /// USB mass storage: allow or block.
+    /// USB mass storage: allow, read_only or block.
     #[prost(string, tag = "2")]
     pub usb_storage: ::prost::alloc::string::String,
     /// vendor:product IDs (hex, e.g. "0781:5583") that are always allowed.
@@ -330,6 +349,12 @@ pub struct TamperPolicy {
     /// SHA-256 (hex) of the maintenance token that unlocks the agent locally.
     #[prost(string, tag = "2")]
     pub maintenance_token_sha256: ::prost::alloc::string::String,
+    /// The policy's admin password (PBKDF2-SHA256, hex), which unlocks the
+    /// agent locally like the maintenance token.
+    #[prost(string, tag = "3")]
+    pub password_salt: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub password_hash: ::prost::alloc::string::String,
 }
 #[allow(clippy::all)]
 #[derive(Clone, PartialEq, ::prost::Message)]

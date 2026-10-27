@@ -156,14 +156,21 @@ func (s *Agents) Heartbeat(ctx context.Context, req *xdrv1.HeartbeatRequest) (*x
 		}
 	}
 	resp.ContentVersion = s.Detect.Content().Version
+	sp := &xdrv1.SelfProtectionPolicy{}
 	if p, _, _, err := ResolvePrevention(ctx, s.DB, a.id); err == nil {
+		sp = p.SelfProtection
+		// Agents only need the hash, and it already travels in Tamper.
+		p.SelfProtection = &xdrv1.SelfProtectionPolicy{Enabled: sp.Enabled}
 		resp.Prevention = p
 	} else {
 		s.Log.Warn("prevention policy", "agent_id", a.id, "err", err)
 	}
 	if on, tok, err := s.DB.TamperPolicy(ctx, a.id); err == nil {
 		sum := sha256.Sum256([]byte(tok))
-		resp.Tamper = &xdrv1.TamperPolicy{Enabled: on, MaintenanceTokenSha256: hex.EncodeToString(sum[:])}
+		resp.Tamper = &xdrv1.TamperPolicy{Enabled: on || sp.Enabled, MaintenanceTokenSha256: hex.EncodeToString(sum[:])}
+		if sp.Enabled {
+			resp.Tamper.PasswordSalt, resp.Tamper.PasswordHash = sp.PasswordSalt, sp.PasswordHash
+		}
 	} else {
 		s.Log.Warn("tamper policy", "agent_id", a.id, "err", err)
 	}

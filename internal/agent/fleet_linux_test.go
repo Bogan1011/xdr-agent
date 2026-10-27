@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 
 	xdrv1 "github.com/Bogan1011/xdr-agent/gen/xdr/v1"
+	"github.com/Bogan1011/xdr-agent/internal/policy"
 )
 
 func hexSum(b []byte) string {
@@ -100,5 +101,25 @@ func TestPendingUpdateRoundTrip(t *testing.T) {
 	a.clearPending()
 	if a.loadPending() != nil {
 		t.Fatal("marker not cleared")
+	}
+}
+
+func TestEnterMaintenanceWithPassword(t *testing.T) {
+	cfg := &Config{StateDir: t.TempDir()}
+	sp := &xdrv1.SelfProtectionPolicy{NewPassword: "Admin-pass-1"}
+	if err := policy.SetPassword(sp); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(tamperPolicy{Enabled: true, TokenSHA256: hexSum([]byte("tok")), PasswordSalt: sp.PasswordSalt, PasswordHash: sp.PasswordHash})
+	os.WriteFile(cfg.path("tamper.json"), raw, 0o600)
+	if _, err := EnterMaintenance(cfg, "admin-pass-1", time.Hour); err == nil {
+		t.Fatal("wrong password accepted")
+	}
+	if _, err := EnterMaintenance(cfg, "Admin-pass-1", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	tp := newTamper(cfg, slog.New(slog.DiscardHandler), func(string, string) {})
+	if !tp.maintenanceActive() {
+		t.Fatal("maintenance not active with the password")
 	}
 }

@@ -48,6 +48,7 @@ func Default() *xdrv1.PreventionPolicy {
 		DeviceControl:      &xdrv1.DeviceControlPolicy{UsbStorage: "allow"},
 		ActivityMonitoring: &xdrv1.ActivityMonitoringPolicy{Process: true, File: true, Network: true},
 		ApplicationControl: &xdrv1.ApplicationControlPolicy{},
+		SelfProtection:     &xdrv1.SelfProtectionPolicy{},
 	}
 }
 

@@ -17,13 +17,14 @@ const (
 	WebReputationTable = "xdr_webrep"
 	IntrusionTable     = "xdr_ips"
 
-	maxDomains      = 1000
-	maxAllow        = 100
-	maxDevices      = 100
-	maxAppPaths     = 500
-	maxAppHashes    = 5000
-	USBStorageAllow = "allow"
-	USBStorageBlock = "block"
+	maxDomains         = 1000
+	maxAllow           = 100
+	maxDevices         = 100
+	maxAppPaths        = 500
+	maxAppHashes       = 5000
+	USBStorageAllow    = "allow"
+	USBStorageReadOnly = "read_only"
+	USBStorageBlock    = "block"
 )
 
 var (
@@ -82,6 +83,9 @@ func normalizeModules(p *xdrv1.PreventionPolicy) {
 	if p.ApplicationControl == nil {
 		p.ApplicationControl = &xdrv1.ApplicationControlPolicy{}
 	}
+	if p.SelfProtection == nil {
+		p.SelfProtection = &xdrv1.SelfProtectionPolicy{}
+	}
 	ac := p.ApplicationControl
 	for _, l := range [][]string{ac.BlockedSha256, ac.AllowedSha256} {
 		for i, h := range l {
@@ -133,8 +137,11 @@ func validateModules(p *xdrv1.PreventionPolicy) error {
 	}
 
 	dc := p.DeviceControl
-	if dc.UsbStorage != USBStorageAllow && dc.UsbStorage != USBStorageBlock {
-		return fmt.Errorf("device control: USB storage must be allow or block")
+	if dc.UsbStorage != USBStorageAllow && dc.UsbStorage != USBStorageReadOnly && dc.UsbStorage != USBStorageBlock {
+		return fmt.Errorf("device control: USB storage must be allow, read_only or block")
+	}
+	if sp := p.SelfProtection; sp.Enabled && sp.PasswordHash == "" && sp.NewPassword == "" {
+		return fmt.Errorf("self-protection: set a password")
 	}
 	if len(dc.AllowedDevices) > maxDevices {
 		return fmt.Errorf("device control: at most %d allowed devices", maxDevices)

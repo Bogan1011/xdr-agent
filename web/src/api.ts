@@ -316,7 +316,7 @@ export interface PreventionPolicy {
     ban_minutes: number;
     allow: string[];
   };
-  device_control: { enabled: boolean; usb_storage: "allow" | "block"; allowed_devices: string[] };
+  device_control: { enabled: boolean; usb_storage: "allow" | "read_only" | "block"; allowed_devices: string[] };
   activity_monitoring: { process: boolean; file: boolean; network: boolean };
   application_control: {
     enabled: boolean;
@@ -329,6 +329,7 @@ export interface PreventionPolicy {
     block_scripts: boolean;
     script_paths: string[];
   };
+  self_protection: { enabled: boolean; new_password: string; password_salt: string; password_hash: string };
 }
 
 export interface PreventionState {
@@ -625,6 +626,7 @@ export const policyModules = [
   { key: "device_control", label: "Device control" },
   { key: "activity_monitoring", label: "Activity monitoring" },
   { key: "application_control", label: "Application control" },
+  { key: "self_protection", label: "Self-protection" },
 ] as const;
 
 export type ModuleKey = (typeof policyModules)[number]["key"];

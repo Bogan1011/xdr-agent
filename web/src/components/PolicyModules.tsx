@@ -61,6 +61,7 @@ export function moduleOn(p: PreventionPolicy, m: ModuleKey): boolean {
     case "device_control": return p.device_control.enabled;
     case "activity_monitoring": return p.activity_monitoring.process || p.activity_monitoring.file || p.activity_monitoring.network;
     case "application_control": return p.application_control.enabled;
+    case "self_protection": return p.self_protection.enabled;
   }
 }
 
@@ -70,8 +71,9 @@ const about: Record<ModuleKey, string> = {
   file_integrity: "Records a baseline of critical files and raises an alert when one changes.",
   firewall: "Host firewall rules applied with nftables.",
   intrusion_prevention: "Detects SSH brute force and bans the attacking address for a while.",
-  device_control: "Controls USB storage devices (USB sticks, external disks).",
+  device_control: "Controls USB storage devices (USB sticks, external disks): allow, read-only or block.",
   activity_monitoring: "Chooses which activity the agent records for threat hunting and behaviour rules.",
+  self_protection: "Stops anyone with root from stopping or removing the agent unless they enter the password you set here.",
   application_control: "Stops or reports programs by path or SHA-256, locks a server down to an allow-list, and stops scripts run from temp folders.",
 };
 
@@ -86,6 +88,7 @@ export function ModuleForm({ m, p, set, intel }: { m: ModuleKey; p: PreventionPo
       case "device_control": return <DeviceControl p={p} set={set} />;
       case "activity_monitoring": return <Activity p={p} set={set} />;
       case "application_control": return <AppControl p={p} set={set} />;
+      case "self_protection": return <SelfProtection p={p} set={set} />;
     }
   })();
   return (
@@ -241,13 +244,34 @@ function DeviceControl({ p, set }: { p: PreventionPolicy; set: Set }) {
       <Switch on={dc.enabled} onChange={(enabled) => up({ enabled })} />
       <label className="filters">
         USB storage
-        <select value={dc.usb_storage} onChange={(e) => up({ usb_storage: e.target.value as "allow" | "block" })}>
+        <select value={dc.usb_storage} onChange={(e) => up({ usb_storage: e.target.value as "allow" | "read_only" | "block" })}>
           <option value="allow">Allow (report each device)</option>
+          <option value="read_only">Read-only (files can be opened, not copied to the device)</option>
           <option value="block">Block</option>
         </select>
       </label>
       <ListField label="Always allowed devices (vendor:product, e.g. 0781:5583)" rows={4} value={dc.allowed_devices} onChange={(allowed_devices) => up({ allowed_devices })} />
       <div className="muted small">Find a device's ID with <span className="mono">lsusb</span>. Keyboards, mice and other USB devices are never affected.</div>
+    </>
+  );
+}
+
+function SelfProtection({ p, set }: { p: PreventionPolicy; set: Set }) {
+  const sp = p.self_protection;
+  const up = (v: Partial<typeof sp>) => set({ ...p, self_protection: { ...sp, ...v } });
+  const hasPassword = !!sp.password_hash;
+  return (
+    <>
+      <Switch on={sp.enabled} onChange={(enabled) => up({ enabled })} />
+      <label className="filters">
+        {hasPassword ? "New password (leave empty to keep the current one)" : "Password"}
+        <input type="password" autoComplete="new-password" value={sp.new_password ?? ""} placeholder="8 characters or more" onChange={(e) => up({ new_password: e.target.value })} />
+      </label>
+      <div className="muted small">
+        {hasPassword ? "A password is set. " : "No password set yet. "}
+        To stop or remove the agent on a host, run <span className="mono">xdr-agent maintenance --password '&lt;password&gt;'</span> as root. The console only keeps a hash of it.
+        The per-endpoint tamper protection switch and maintenance token keep working.
+      </div>
     </>
   );
 }
