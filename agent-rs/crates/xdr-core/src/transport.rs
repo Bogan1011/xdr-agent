@@ -17,6 +17,9 @@ fn endpoint(addr: &str, tls: ClientTlsConfig) -> Result<Endpoint> {
     Ok(Endpoint::from_shared(format!("https://{addr}"))?
         .tls_config(tls)?
         .connect_timeout(Duration::from_secs(15))
+        // Enforced on the client: grpc-timeout alone lets a call wait for a
+        // reconnect for as long as the console is down.
+        .timeout(Duration::from_secs(30))
         .http2_keep_alive_interval(Duration::from_secs(60))
         .keep_alive_timeout(Duration::from_secs(20))
         .keep_alive_while_idle(true))
