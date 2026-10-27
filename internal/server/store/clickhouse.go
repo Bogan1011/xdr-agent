@@ -45,14 +45,38 @@ func OpenClickHouse(ctx context.Context, o ClickHouseOptions) (*ClickHouse, erro
 
 func (c *ClickHouse) Close() error { return c.conn.Close() }
 
+// eventsV0Columns are the columns of the events table before schema
+// version 1, copied over when an older table is upgraded.
+const eventsV0Columns = `ts, agent_id, hostname, event_id, type, pid, ppid, uid, user, exe, args, cwd,
+	sha256, parent_exe, exit_code, path, old_path, size, mode, protocol, local_addr, local_port,
+	remote_addr, remote_port`
+
 func (c *ClickHouse) migrate(ctx context.Context, ttlDays int) error {
-	return c.conn.Exec(ctx, fmt.Sprintf(`
+	// The sort key leads with tenant_id, which an existing table cannot gain,
+	// so a pre-v1 table is renamed, recreated and its rows copied.
+	var legacy, upgraded uint64
+	if err := c.conn.QueryRow(ctx, `SELECT countIf(name = 'event_id'), countIf(name = 'tenant_id')
+		FROM system.columns WHERE database = currentDatabase() AND table = 'events'`).Scan(&legacy, &upgraded); err != nil {
+		return err
+	}
+	if legacy > 0 && upgraded == 0 {
+		if err := c.conn.Exec(ctx, `RENAME TABLE events TO events_v0`); err != nil {
+			return err
+		}
+	}
+	// ReplacingMergeTree drops rows an agent re-sent after a lost
+	// acknowledgement, since the event_id repeats.
+	if err := c.conn.Exec(ctx, fmt.Sprintf(`
 CREATE TABLE IF NOT EXISTS events (
 	ts          DateTime64(9, 'UTC'),
+	tenant_id   LowCardinality(String) DEFAULT 'default',
 	agent_id    LowCardinality(String),
+	endpoint_id LowCardinality(String) DEFAULT '',
 	hostname    LowCardinality(String),
 	event_id    String,
+	schema_version UInt16 DEFAULT 0,
 	type        LowCardinality(String),
+	priority    LowCardinality(String) DEFAULT '',
 	pid         UInt32,
 	ppid        UInt32,
 	uid         UInt32,
@@ -63,6 +87,12 @@ CREATE TABLE IF NOT EXISTS events (
 	sha256      String,
 	parent_exe  String,
 	exit_code   Int32,
+	process_guid        String DEFAULT '',
+	parent_process_guid String DEFAULT '',
+	parent_args         String DEFAULT '',
+	parent_user         LowCardinality(String) DEFAULT '',
+	parent_sha256       String DEFAULT '',
+	process_start       DateTime64(9, 'UTC') DEFAULT 0,
 	path        String,
 	old_path    String,
 	size        UInt64,
@@ -72,39 +102,62 @@ CREATE TABLE IF NOT EXISTS events (
 	local_port  UInt32,
 	remote_addr String,
 	remote_port UInt32,
+	metadata    Map(LowCardinality(String), String),
 	INDEX idx_sha256 sha256 TYPE bloom_filter GRANULARITY 4,
-	INDEX idx_remote remote_addr TYPE bloom_filter GRANULARITY 4
-) ENGINE = MergeTree
+	INDEX idx_remote remote_addr TYPE bloom_filter GRANULARITY 4,
+	INDEX idx_guid process_guid TYPE bloom_filter GRANULARITY 4,
+	INDEX idx_parent_guid parent_process_guid TYPE bloom_filter GRANULARITY 4
+) ENGINE = ReplacingMergeTree
 PARTITION BY toYYYYMMDD(ts)
-ORDER BY (agent_id, type, ts)
-TTL toDateTime(ts) + INTERVAL %d DAY`, ttlDays))
+ORDER BY (tenant_id, agent_id, type, ts, event_id)
+TTL toDateTime(ts) + INTERVAL %d DAY`, ttlDays)); err != nil {
+		return err
+	}
+	if legacy > 0 && upgraded == 0 {
+		if err := c.conn.Exec(ctx, `INSERT INTO events (`+eventsV0Columns+`) SELECT `+eventsV0Columns+` FROM events_v0`); err != nil {
+			return fmt.Errorf("copy events to the v1 table (old rows stay in events_v0): %w", err)
+		}
+		return c.conn.Exec(ctx, `DROP TABLE events_v0`)
+	}
+	return nil
 }
 
 type Event struct {
-	Time       time.Time `json:"ts" ch:"ts"`
-	AgentID    string    `json:"agent_id" ch:"agent_id"`
-	Hostname   string    `json:"hostname" ch:"hostname"`
-	EventID    string    `json:"event_id" ch:"event_id"`
-	Type       string    `json:"type" ch:"type"`
-	PID        uint32    `json:"pid" ch:"pid"`
-	PPID       uint32    `json:"ppid" ch:"ppid"`
-	UID        uint32    `json:"uid" ch:"uid"`
-	User       string    `json:"user" ch:"user"`
-	Exe        string    `json:"exe" ch:"exe"`
-	Args       string    `json:"args" ch:"args"`
-	Cwd        string    `json:"cwd" ch:"cwd"`
-	SHA256     string    `json:"sha256" ch:"sha256"`
-	ParentExe  string    `json:"parent_exe" ch:"parent_exe"`
-	ExitCode   int32     `json:"exit_code" ch:"exit_code"`
-	Path       string    `json:"path" ch:"path"`
-	OldPath    string    `json:"old_path" ch:"old_path"`
-	Size       uint64    `json:"size" ch:"size"`
-	Mode       uint32    `json:"mode" ch:"mode"`
-	Protocol   string    `json:"protocol" ch:"protocol"`
-	LocalAddr  string    `json:"local_addr" ch:"local_addr"`
-	LocalPort  uint32    `json:"local_port" ch:"local_port"`
-	RemoteAddr string    `json:"remote_addr" ch:"remote_addr"`
-	RemotePort uint32    `json:"remote_port" ch:"remote_port"`
+	Time          time.Time         `json:"ts" ch:"ts"`
+	TenantID      string            `json:"tenant_id" ch:"tenant_id"`
+	AgentID       string            `json:"agent_id" ch:"agent_id"`
+	EndpointID    string            `json:"endpoint_id" ch:"endpoint_id"`
+	Hostname      string            `json:"hostname" ch:"hostname"`
+	EventID       string            `json:"event_id" ch:"event_id"`
+	SchemaVersion uint16            `json:"schema_version" ch:"schema_version"`
+	Type          string            `json:"type" ch:"type"`
+	Priority      string            `json:"priority" ch:"priority"`
+	PID           uint32            `json:"pid" ch:"pid"`
+	PPID          uint32            `json:"ppid" ch:"ppid"`
+	UID           uint32            `json:"uid" ch:"uid"`
+	User          string            `json:"user" ch:"user"`
+	Exe           string            `json:"exe" ch:"exe"`
+	Args          string            `json:"args" ch:"args"`
+	Cwd           string            `json:"cwd" ch:"cwd"`
+	SHA256        string            `json:"sha256" ch:"sha256"`
+	ParentExe     string            `json:"parent_exe" ch:"parent_exe"`
+	ExitCode      int32             `json:"exit_code" ch:"exit_code"`
+	ProcessGUID   string            `json:"process_guid" ch:"process_guid"`
+	ParentGUID    string            `json:"parent_process_guid" ch:"parent_process_guid"`
+	ParentArgs    string            `json:"parent_args" ch:"parent_args"`
+	ParentUser    string            `json:"parent_user" ch:"parent_user"`
+	ParentSHA256  string            `json:"parent_sha256" ch:"parent_sha256"`
+	ProcessStart  time.Time         `json:"process_start" ch:"process_start"`
+	Path          string            `json:"path" ch:"path"`
+	OldPath       string            `json:"old_path" ch:"old_path"`
+	Size          uint64            `json:"size" ch:"size"`
+	Mode          uint32            `json:"mode" ch:"mode"`
+	Protocol      string            `json:"protocol" ch:"protocol"`
+	LocalAddr     string            `json:"local_addr" ch:"local_addr"`
+	LocalPort     uint32            `json:"local_port" ch:"local_port"`
+	RemoteAddr    string            `json:"remote_addr" ch:"remote_addr"`
+	RemotePort    uint32            `json:"remote_port" ch:"remote_port"`
+	Metadata      map[string]string `json:"metadata,omitempty" ch:"metadata"`
 }
 
 func (c *ClickHouse) Insert(ctx context.Context, events []Event) error {
@@ -125,13 +178,15 @@ func (c *ClickHouse) Insert(ctx context.Context, events []Event) error {
 }
 
 type EventQuery struct {
-	AgentID  string
-	Types    []string
-	Search   string
-	SHA256   string
-	PID      uint32
-	From, To time.Time
-	Limit    int
+	AgentID string
+	Types   []string
+	Search  string
+	SHA256  string
+	PID     uint32
+	// ProcessGUID matches the process and its direct children.
+	ProcessGUID string
+	From, To    time.Time
+	Limit       int
 }
 
 func (c *ClickHouse) Query(ctx context.Context, q EventQuery) ([]Event, error) {
@@ -152,6 +207,9 @@ func (c *ClickHouse) Query(ctx context.Context, q EventQuery) ([]Event, error) {
 	}
 	if q.PID != 0 {
 		add("(pid = ? OR ppid = ?)", q.PID, q.PID)
+	}
+	if q.ProcessGUID != "" {
+		add("(process_guid = ? OR parent_process_guid = ?)", q.ProcessGUID, q.ProcessGUID)
 	}
 	if !q.From.IsZero() {
 		add("ts >= ?", q.From)

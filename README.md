@@ -274,6 +274,10 @@ with `cd web && npm run dev` (it proxies `/api` to `:8080`).
    application control.
 7. **Lockdown** (0.7.0): application control allow-list mode and blocking
    of scripts run by shells and interpreters from temp folders.
-8. The remaining Linux gaps in the comparison (investigation, console
-   hardening, vulnerability and posture, live response), then the Windows
-   agent.
+8. **Architecture foundation** (0.8.0): canonical SecurityEvent v1 with a
+   stable `process_guid` and parent context on every event, event priority,
+   tenant_id and policy versions in the data model. See
+   [docs/architecture.md](docs/architecture.md) for the target architecture
+   and the Rust agent plan.
+9. Rust agent, detection service split, process tree and real-time command
+   stream, then the remaining Linux gaps and the Windows agent.

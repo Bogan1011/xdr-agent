@@ -114,6 +114,8 @@ message PreventionPolicy {
   ApplicationControlPolicy application_control = 9;
   // The console's name for the policy, shown in the agent's log.
   string name = 10;
+  // Bumped on every change to the policy in the console.
+  int64 version = 11;
 }
 
 message AntiMalwarePolicy {
@@ -347,10 +349,33 @@ enum EventType {
   EVENT_TYPE_APP_CONTROL = 18;
 }
 
+// Priority decides what survives when an agent's local queue is under
+// pressure: the lowest priority is dropped first, critical events last.
+enum Priority {
+  PRIORITY_UNSPECIFIED = 0;
+  PRIORITY_LOW = 1;
+  PRIORITY_NORMAL = 2;
+  PRIORITY_HIGH = 3;
+  PRIORITY_CRITICAL = 4;
+}
+
+// Event is the canonical SecurityEvent. Linux and Windows agents produce the
+// same logical model; see docs/architecture.md. Fields 4-9 and 20 form the
+// schema_version 1 envelope; agents built before it leave them empty.
 message Event {
   string id = 1;
   int64 timestamp_unix_nano = 2;
   EventType type = 3;
+  uint32 schema_version = 4;
+  string agent_id = 5;
+  // Set by the server from the enrollment record. The certificate only
+  // authenticates the host; values sent by the agent are ignored.
+  string tenant_id = 6;
+  string endpoint_id = 7;
+  Priority priority = 8;
+  // The process that caused the event (for process events, the process itself).
+  ProcessContext process_context = 9;
+  map<string, string> metadata = 20;
   oneof payload {
     ProcessEvent process = 10;
     FileEvent file = 11;
@@ -359,6 +384,26 @@ message Event {
     TamperEvent tamper = 14;
     PolicyEvent policy = 15;
   }
+}
+
+// ProcessContext identifies a process by process_guid, which stays unique
+// when the kernel reuses a PID. On Linux it is derived from the boot ID, the
+// PID and the process start time.
+message ProcessContext {
+  string process_guid = 1;
+  uint32 pid = 2;
+  uint32 ppid = 3;
+  string executable = 4;
+  string command_line = 5;
+  string user = 6;
+  uint32 uid = 7;
+  string sha256 = 8;
+  int64 start_time_unix_nano = 9;
+  string parent_process_guid = 10;
+  string parent_executable = 11;
+  string parent_command_line = 12;
+  string parent_user = 13;
+  string parent_sha256 = 14;
 }
 
 message ProcessEvent {
