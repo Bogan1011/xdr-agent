@@ -13,6 +13,8 @@ RUN npm run build
 # arm64 needs a cross C toolchain for ring.
 FROM rust:1-alpine AS agent
 RUN apk add --no-cache musl-dev
+# Slow or lossy links: one connection at a time, longer timeouts, more retries.
+ENV CARGO_HTTP_MULTIPLEXING=false CARGO_HTTP_TIMEOUT=300 CARGO_NET_RETRY=10
 WORKDIR /src
 COPY agent-rs/ ./
 ARG VERSION=dev
