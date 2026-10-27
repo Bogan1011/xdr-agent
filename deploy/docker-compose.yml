@@ -9,8 +9,6 @@ services:
     image: xdr-server:local
     build:
       context: ..
-      # Host networking avoids Docker bridge MTU stalls when downloading crates.
-      network: host
       args:
         VERSION: ${XDR_VERSION:-0.10.0}
     restart: unless-stopped
