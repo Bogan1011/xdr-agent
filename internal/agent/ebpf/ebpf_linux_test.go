@@ -87,6 +87,43 @@ func TestLoadAndCapture(t *testing.T) {
 	}
 }
 
+// TestShellCapture checks the bash uprobes. Like TestLoadAndCapture it
+// needs root, so it only runs when XDR_EBPF_TEST=1.
+func TestShellCapture(t *testing.T) {
+	if os.Getenv("XDR_EBPF_TEST") != "1" {
+		t.Skip("set XDR_EBPF_TEST=1 and run as root")
+	}
+	p, err := Load(slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	if p.Shell == nil {
+		t.Fatal("bash probes missing")
+	}
+	script := "true xdr-shell-probe-" + itoa(os.Getpid())
+	if out, err := runShell(script); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	// bash -c runs its string through parse_and_execute.
+	for {
+		rec, err := read(p.Shell)
+		if err != nil {
+			t.Fatalf("no shell event: %v", err)
+		}
+		e, err := ParseShellEvent(rec.RawSample)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e.Command == script {
+			if e.Src != ShellString || e.PID == 0 || e.Comm != "bash" {
+				t.Errorf("bad shell event %+v", e)
+			}
+			return
+		}
+	}
+}
+
 func read(r *ringbuf.Reader) (ringbuf.Record, error) {
 	r.SetDeadline(time.Now().Add(5 * time.Second))
 	rec, err := r.Read()

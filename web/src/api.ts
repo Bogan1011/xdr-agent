@@ -590,7 +590,7 @@ export const statusLabels: Record<AlertStatus, string> = {
 export type Category = "process" | "file" | "network";
 
 export function categoryOf(type: string): Category {
-  if (type.startsWith("process") || type === "exec_blocked" || type === "app_control") return "process";
+  if (type.startsWith("process") || type === "shell_command" || type === "exec_blocked" || type === "app_control") return "process";
   if (type.startsWith("file") || type === "yara_match" || type === "fim_change") return "file";
   return "network";
 }
@@ -598,6 +598,7 @@ export function categoryOf(type: string): Category {
 export const typeLabels: Record<string, string> = {
   process_exec: "Process start",
   process_exit: "Process exit",
+  shell_command: "Shell command",
   file_create: "File created",
   file_modify: "File modified",
   file_delete: "File deleted",

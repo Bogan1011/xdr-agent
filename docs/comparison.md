@@ -30,6 +30,7 @@ Legend: ✅ have it · 🟡 partial · ❌ not yet
 | Device control (USB) | ✅ USB storage allow, read-only or block, with exceptions | ✅ | ✅ |
 | **Detection and investigation** | | | |
 | Process, file, network telemetry | ✅ | ✅ | ✅ |
+| Shell command telemetry (bash builtins, typed commands) | ✅ eBPF uprobes on bash (interactive lines, bash -c / eval strings) | ✅ | ✅ |
 | Behaviour rules, MITRE tags | ✅ Sigma-style, 20+ built-in | ✅ | ✅ |
 | Custom rules | ✅ in the console | ✅ | ✅ |
 | Threat intel feeds / IOCs | ✅ hash, IP/CIDR, domain feeds | ✅ | ✅ |

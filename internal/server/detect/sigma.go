@@ -84,6 +84,7 @@ var Fields = map[string]func(*store.Event) string{
 var categories = map[string][]string{
 	"process_creation":    {"process_exec"},
 	"process_termination": {"process_exit"},
+	"shell_command":       {"shell_command"},
 	"file_event":          {"file_create", "file_modify", "file_rename", "file_attrib"},
 	"file_change":         {"file_modify"},
 	"file_rename":         {"file_rename"},

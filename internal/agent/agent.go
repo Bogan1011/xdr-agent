@@ -200,6 +200,10 @@ func (a *Agent) Run() error {
 		collectors = append(collectors, &collector.Network{Interval: a.cfg.NetworkInterval})
 	}
 
+	if probes != nil && probes.Shell != nil {
+		collectors = append(collectors, &collector.EBPFShell{Reader: probes.Shell, Log: a.log.With("collector", "shell-ebpf")})
+	}
+
 	var wg sync.WaitGroup
 	for _, c := range collectors {
 		wg.Add(1)

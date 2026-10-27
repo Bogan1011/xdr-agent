@@ -83,6 +83,8 @@ func actorPID(e *xdrv1.Event) uint32 {
 		return p.Tamper.Pid
 	case *xdrv1.Event_Policy:
 		return p.Policy.Pid
+	case *xdrv1.Event_Shell:
+		return p.Shell.Pid
 	}
 	return 0
 }

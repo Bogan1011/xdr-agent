@@ -16,16 +16,19 @@ import (
 //
 // Used for safe lookups in a Collection or CollectionSpec.
 const (
-	xdrMapFileEvents  = "file_events"
-	xdrMapNetEvents   = "net_events"
-	xdrProgFileChmod  = "file_chmod"
-	xdrProgFileCreate = "file_create"
-	xdrProgFileDelete = "file_delete"
-	xdrProgFileOpen   = "file_open"
-	xdrProgFileRename = "file_rename"
-	xdrProgNetAccept  = "net_accept"
-	xdrProgNetConnect = "net_connect"
-	xdrVarAgentTgid   = "agent_tgid"
+	xdrMapFileEvents     = "file_events"
+	xdrMapNetEvents      = "net_events"
+	xdrMapShellEvents    = "shell_events"
+	xdrProgFileChmod     = "file_chmod"
+	xdrProgFileCreate    = "file_create"
+	xdrProgFileDelete    = "file_delete"
+	xdrProgFileOpen      = "file_open"
+	xdrProgFileRename    = "file_rename"
+	xdrProgNetAccept     = "net_accept"
+	xdrProgNetConnect    = "net_connect"
+	xdrProgShellReadline = "shell_readline"
+	xdrProgShellString   = "shell_string"
+	xdrVarAgentTgid      = "agent_tgid"
 )
 
 // loadXdr returns the embedded CollectionSpec for xdr.
@@ -70,21 +73,24 @@ type xdrSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type xdrProgramSpecs struct {
-	FileChmod  *ebpf.ProgramSpec `ebpf:"file_chmod"`
-	FileCreate *ebpf.ProgramSpec `ebpf:"file_create"`
-	FileDelete *ebpf.ProgramSpec `ebpf:"file_delete"`
-	FileOpen   *ebpf.ProgramSpec `ebpf:"file_open"`
-	FileRename *ebpf.ProgramSpec `ebpf:"file_rename"`
-	NetAccept  *ebpf.ProgramSpec `ebpf:"net_accept"`
-	NetConnect *ebpf.ProgramSpec `ebpf:"net_connect"`
+	FileChmod     *ebpf.ProgramSpec `ebpf:"file_chmod"`
+	FileCreate    *ebpf.ProgramSpec `ebpf:"file_create"`
+	FileDelete    *ebpf.ProgramSpec `ebpf:"file_delete"`
+	FileOpen      *ebpf.ProgramSpec `ebpf:"file_open"`
+	FileRename    *ebpf.ProgramSpec `ebpf:"file_rename"`
+	NetAccept     *ebpf.ProgramSpec `ebpf:"net_accept"`
+	NetConnect    *ebpf.ProgramSpec `ebpf:"net_connect"`
+	ShellReadline *ebpf.ProgramSpec `ebpf:"shell_readline"`
+	ShellString   *ebpf.ProgramSpec `ebpf:"shell_string"`
 }
 
 // xdrMapSpecs contains maps before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type xdrMapSpecs struct {
-	FileEvents *ebpf.MapSpec `ebpf:"file_events"`
-	NetEvents  *ebpf.MapSpec `ebpf:"net_events"`
+	FileEvents  *ebpf.MapSpec `ebpf:"file_events"`
+	NetEvents   *ebpf.MapSpec `ebpf:"net_events"`
+	ShellEvents *ebpf.MapSpec `ebpf:"shell_events"`
 }
 
 // xdrVariableSpecs contains global variables before they are loaded into the kernel.
@@ -114,14 +120,16 @@ func (o *xdrObjects) Close() error {
 //
 // It can be passed to loadXdrObjects or ebpf.CollectionSpec.LoadAndAssign.
 type xdrMaps struct {
-	FileEvents *ebpf.Map `ebpf:"file_events"`
-	NetEvents  *ebpf.Map `ebpf:"net_events"`
+	FileEvents  *ebpf.Map `ebpf:"file_events"`
+	NetEvents   *ebpf.Map `ebpf:"net_events"`
+	ShellEvents *ebpf.Map `ebpf:"shell_events"`
 }
 
 func (m *xdrMaps) Close() error {
 	return _XdrClose(
 		m.FileEvents,
 		m.NetEvents,
+		m.ShellEvents,
 	)
 }
 
@@ -136,13 +144,15 @@ type xdrVariables struct {
 //
 // It can be passed to loadXdrObjects or ebpf.CollectionSpec.LoadAndAssign.
 type xdrPrograms struct {
-	FileChmod  *ebpf.Program `ebpf:"file_chmod"`
-	FileCreate *ebpf.Program `ebpf:"file_create"`
-	FileDelete *ebpf.Program `ebpf:"file_delete"`
-	FileOpen   *ebpf.Program `ebpf:"file_open"`
-	FileRename *ebpf.Program `ebpf:"file_rename"`
-	NetAccept  *ebpf.Program `ebpf:"net_accept"`
-	NetConnect *ebpf.Program `ebpf:"net_connect"`
+	FileChmod     *ebpf.Program `ebpf:"file_chmod"`
+	FileCreate    *ebpf.Program `ebpf:"file_create"`
+	FileDelete    *ebpf.Program `ebpf:"file_delete"`
+	FileOpen      *ebpf.Program `ebpf:"file_open"`
+	FileRename    *ebpf.Program `ebpf:"file_rename"`
+	NetAccept     *ebpf.Program `ebpf:"net_accept"`
+	NetConnect    *ebpf.Program `ebpf:"net_connect"`
+	ShellReadline *ebpf.Program `ebpf:"shell_readline"`
+	ShellString   *ebpf.Program `ebpf:"shell_string"`
 }
 
 func (p *xdrPrograms) Close() error {
@@ -154,6 +164,8 @@ func (p *xdrPrograms) Close() error {
 		p.FileRename,
 		p.NetAccept,
 		p.NetConnect,
+		p.ShellReadline,
+		p.ShellString,
 	)
 }
 

@@ -96,7 +96,8 @@ func (p *Prevention) AutoQuarantine() bool { return p.quarantine.Load() }
 // Prevention and detection events are always sent.
 func (p *Prevention) Telemetry(t xdrv1.EventType) bool {
 	switch t {
-	case xdrv1.EventType_EVENT_TYPE_PROCESS_EXEC, xdrv1.EventType_EVENT_TYPE_PROCESS_EXIT:
+	case xdrv1.EventType_EVENT_TYPE_PROCESS_EXEC, xdrv1.EventType_EVENT_TYPE_PROCESS_EXIT,
+		xdrv1.EventType_EVENT_TYPE_SHELL_COMMAND:
 		return p.sendProc.Load()
 	case xdrv1.EventType_EVENT_TYPE_FILE_CREATE, xdrv1.EventType_EVENT_TYPE_FILE_MODIFY, xdrv1.EventType_EVENT_TYPE_FILE_DELETE,
 		xdrv1.EventType_EVENT_TYPE_FILE_RENAME, xdrv1.EventType_EVENT_TYPE_FILE_ATTRIB:

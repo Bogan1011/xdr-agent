@@ -281,7 +281,7 @@ function Activity({ p, set }: { p: PreventionPolicy; set: Set }) {
   const up = (v: Partial<typeof am>) => set({ ...p, activity_monitoring: { ...am, ...v } });
   return (
     <>
-      <Check checked={am.process} onChange={(process) => up({ process })}>Process activity (programs started and stopped)</Check>
+      <Check checked={am.process} onChange={(process) => up({ process })}>Process activity (programs started and stopped, and bash commands)</Check>
       <Check checked={am.file} onChange={(file) => up({ file })}>File activity (created, changed, deleted)</Check>
       <Check checked={am.network} onChange={(network) => up({ network })}>Network activity (connections and listening ports)</Check>
       <div className="muted small">Turning a kind off saves bandwidth and storage, but behaviour rules on it stop working. Alerts and prevention events are always sent.</div>

@@ -187,6 +187,7 @@ export default function EndpointDetail() {
           <select value={type} onChange={(e) => setType(e.target.value)}>
             <option value="">All events</option>
             <option value="process_exec,process_exit">Process</option>
+            <option value="shell_command">Shell commands</option>
             <option value="file_create,file_modify,file_delete,file_rename,file_attrib">File</option>
             <option value="net_connect,net_listen">Network</option>
             <option value="agent_tamper">Agent tamper</option>

@@ -464,7 +464,7 @@ pub struct Event {
         ::prost::alloc::string::String,
         ::prost::alloc::string::String,
     >,
-    #[prost(oneof = "event::Payload", tags = "10, 11, 12, 13, 14, 15")]
+    #[prost(oneof = "event::Payload", tags = "10, 11, 12, 13, 14, 15, 16")]
     pub payload: ::core::option::Option<event::Payload>,
 }
 /// Nested message and enum types in `Event`.
@@ -484,6 +484,8 @@ pub mod event {
         Tamper(super::TamperEvent),
         #[prost(message, tag = "15")]
         Policy(super::PolicyEvent),
+        #[prost(message, tag = "16")]
+        Shell(super::ShellCommandEvent),
     }
 }
 /// ProcessContext identifies a process by process_guid, which stays unique
@@ -630,6 +632,34 @@ pub struct TamperEvent {
     pub pid: u32,
     #[prost(string, tag = "4")]
     pub exe: ::prost::alloc::string::String,
+}
+/// A command bash ran, including builtins (cd, source, history) that start
+/// no process and so never show up as an exec.
+#[allow(clippy::all)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ShellCommandEvent {
+    /// The bash process.
+    #[prost(uint32, tag = "1")]
+    pub pid: u32,
+    #[prost(uint32, tag = "2")]
+    pub ppid: u32,
+    #[prost(uint32, tag = "3")]
+    pub uid: u32,
+    #[prost(string, tag = "4")]
+    pub user: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub exe: ::prost::alloc::string::String,
+    /// At most 511 bytes.
+    #[prost(string, tag = "6")]
+    pub command: ::prost::alloc::string::String,
+    /// interactive (typed at a prompt) or string (bash -c, eval, a trap).
+    #[prost(string, tag = "7")]
+    pub source: ::prost::alloc::string::String,
+    /// The terminal, e.g. pts/0; empty without one.
+    #[prost(string, tag = "8")]
+    pub tty: ::prost::alloc::string::String,
+    #[prost(string, tag = "9")]
+    pub cwd: ::prost::alloc::string::String,
 }
 /// What a policy module saw or did.
 #[allow(clippy::all)]
@@ -1032,6 +1062,8 @@ pub enum EventType {
     Intrusion = 16,
     DeviceControl = 17,
     AppControl = 18,
+    /// A command run by bash: typed at a prompt, or a string it was given.
+    ShellCommand = 19,
 }
 impl EventType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1059,6 +1091,7 @@ impl EventType {
             Self::Intrusion => "EVENT_TYPE_INTRUSION",
             Self::DeviceControl => "EVENT_TYPE_DEVICE_CONTROL",
             Self::AppControl => "EVENT_TYPE_APP_CONTROL",
+            Self::ShellCommand => "EVENT_TYPE_SHELL_COMMAND",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1083,6 +1116,7 @@ impl EventType {
             "EVENT_TYPE_INTRUSION" => Some(Self::Intrusion),
             "EVENT_TYPE_DEVICE_CONTROL" => Some(Self::DeviceControl),
             "EVENT_TYPE_APP_CONTROL" => Some(Self::AppControl),
+            "EVENT_TYPE_SHELL_COMMAND" => Some(Self::ShellCommand),
             _ => None,
         }
     }

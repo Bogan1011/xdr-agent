@@ -9,6 +9,7 @@ const typeOptions: [string, string][] = [
   ["process_exec", "Process start"],
   ["process_exit", "Process exit"],
   ["process_exec,process_exit", "Any process"],
+  ["shell_command", "Shell command"],
   ["file_create,file_modify,file_delete,file_rename,file_attrib", "Any file"],
   ["file_modify", "File modified"],
   ["file_delete", "File deleted"],

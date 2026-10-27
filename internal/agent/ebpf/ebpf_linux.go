@@ -23,6 +23,9 @@ var ErrNoBTF = errors.New("kernel BTF not available")
 type Probes struct {
 	Files *ringbuf.Reader
 	Net   *ringbuf.Reader
+	// Shell carries bash commands; nil when bash is missing or its
+	// symbols cannot be probed.
+	Shell *ringbuf.Reader
 
 	objs  xdrObjects
 	links []link.Link
@@ -81,7 +84,12 @@ func Load(log *slog.Logger) (*Probes, error) {
 	} else if p.Net, err = ringbuf.NewReader(p.objs.NetEvents); err != nil {
 		log.Warn("eBPF network ring buffer", "err", err)
 	}
-	if p.Files == nil && p.Net == nil {
+	if err := p.attachShell(); err != nil {
+		log.Warn("bash command telemetry unavailable", "err", err)
+	} else if p.Shell, err = ringbuf.NewReader(p.objs.ShellEvents); err != nil {
+		log.Warn("eBPF shell ring buffer", "err", err)
+	}
+	if p.Files == nil && p.Net == nil && p.Shell == nil {
 		p.Close()
 		return nil, errors.New("no eBPF hooks could be attached")
 	}
@@ -111,7 +119,39 @@ func (p *Probes) attach(hooks []hook) error {
 	return nil
 }
 
+// bashPaths are where distributions install bash; /bin is often a link to
+// /usr/bin, so the first that exists wins.
+var bashPaths = []string{"/usr/bin/bash", "/bin/bash"}
+
+// attachShell puts uprobes on readline and parse_and_execute in bash.
+func (p *Probes) attachShell() error {
+	var exe *link.Executable
+	var err error
+	for _, path := range bashPaths {
+		if exe, err = link.OpenExecutable(path); err == nil {
+			break
+		}
+	}
+	if exe == nil {
+		return fmt.Errorf("bash not found: %w", err)
+	}
+	rl, err := exe.Uretprobe("readline", p.objs.ShellReadline, nil)
+	if err != nil {
+		return fmt.Errorf("readline: %w", err)
+	}
+	pe, err := exe.Uprobe("parse_and_execute", p.objs.ShellString, nil)
+	if err != nil {
+		rl.Close()
+		return fmt.Errorf("parse_and_execute: %w", err)
+	}
+	p.links = append(p.links, rl, pe)
+	return nil
+}
+
 func (p *Probes) Close() error {
+	if p.Shell != nil {
+		p.Shell.Close()
+	}
 	if p.Files != nil {
 		p.Files.Close()
 	}

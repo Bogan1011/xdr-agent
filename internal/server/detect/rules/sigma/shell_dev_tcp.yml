@@ -1,0 +1,12 @@
+id: lnx-shell-dev-tcp
+title: Bash /dev/tcp redirection
+description: A bash command redirects to a TCP or UDP socket with /dev/tcp, the usual one-line reverse shell. Typed at a prompt it starts no new process.
+level: critical
+tags: [attack.execution, attack.t1059.004, attack.command_and_control]
+logsource: {product: linux, category: shell_command}
+detection:
+  selection:
+    cmdline|contains:
+      - /dev/tcp/
+      - /dev/udp/
+  condition: selection

@@ -179,6 +179,44 @@ func netEvent(ev ebpf.NetEvent) *xdrv1.Event {
 	return e
 }
 
+// EBPFShell reports commands run by bash, including builtins (cd, source,
+// history -c) that never start a process.
+type EBPFShell struct {
+	Reader *ringbuf.Reader
+	Log    *slog.Logger
+}
+
+func (s *EBPFShell) Name() string { return "shell-ebpf" }
+
+func (s *EBPFShell) Run(ctx context.Context, emit Emit) error {
+	s.Log.Info("bash command collector running")
+	return readRing(ctx, s.Reader, func(raw []byte) {
+		if ev, err := ebpf.ParseShellEvent(raw); err == nil {
+			emit(shellEvent(ev))
+		}
+	}, nil)
+}
+
+func shellEvent(ev ebpf.ShellEvent) *xdrv1.Event {
+	source := "interactive"
+	if ev.Src == ebpf.ShellString {
+		source = "string"
+	}
+	se := &xdrv1.ShellCommandEvent{
+		Pid: ev.PID, Ppid: ev.PPID, Uid: ev.UID, User: procfs.Username(ev.UID),
+		Exe: processExe(ev.PID, ev.Comm), Command: strings.TrimRight(ev.Command, "\n"), Source: source,
+	}
+	base := fmt.Sprintf("/proc/%d/", ev.PID)
+	se.Cwd, _ = os.Readlink(base + "cwd")
+	if tty, err := os.Readlink(base + "fd/0"); err == nil && strings.HasPrefix(tty, "/dev/") &&
+		(strings.HasPrefix(tty, "/dev/pts/") || strings.HasPrefix(tty, "/dev/tty")) {
+		se.Tty = strings.TrimPrefix(tty, "/dev/")
+	}
+	e := NewEvent(xdrv1.EventType_EVENT_TYPE_SHELL_COMMAND)
+	e.Payload = &xdrv1.Event_Shell{Shell: se}
+	return e
+}
+
 // processExe names the process behind an event. A process that already
 // exited is named by its command name in brackets.
 func processExe(pid uint32, comm string) string {

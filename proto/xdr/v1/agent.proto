@@ -364,6 +364,8 @@ enum EventType {
   EVENT_TYPE_INTRUSION = 16;
   EVENT_TYPE_DEVICE_CONTROL = 17;
   EVENT_TYPE_APP_CONTROL = 18;
+  // A command run by bash: typed at a prompt, or a string it was given.
+  EVENT_TYPE_SHELL_COMMAND = 19;
 }
 
 // Priority decides what survives when an agent's local queue is under
@@ -400,6 +402,7 @@ message Event {
     YaraMatch yara = 13;
     TamperEvent tamper = 14;
     PolicyEvent policy = 15;
+    ShellCommandEvent shell = 16;
   }
 }
 
@@ -485,6 +488,24 @@ message TamperEvent {
   string detail = 2;
   uint32 pid = 3;
   string exe = 4;
+}
+
+// A command bash ran, including builtins (cd, source, history) that start
+// no process and so never show up as an exec.
+message ShellCommandEvent {
+  // The bash process.
+  uint32 pid = 1;
+  uint32 ppid = 2;
+  uint32 uid = 3;
+  string user = 4;
+  string exe = 5;
+  // At most 511 bytes.
+  string command = 6;
+  // interactive (typed at a prompt) or string (bash -c, eval, a trap).
+  string source = 7;
+  // The terminal, e.g. pts/0; empty without one.
+  string tty = 8;
+  string cwd = 9;
 }
 
 // What a policy module saw or did.
