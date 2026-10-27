@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	xdrv1 "github.com/Bogan1011/xdr-agent/gen/xdr/v1"
+	"github.com/Bogan1011/xdr-agent/internal/server/iam"
+	"github.com/Bogan1011/xdr-agent/internal/server/pam"
 	"github.com/Bogan1011/xdr-agent/internal/server/store"
 )
 
@@ -58,15 +61,35 @@ func (s *Agents) RequestElevation(ctx context.Context, req *xdrv1.ElevationReque
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return nil, status.Error(codes.Unavailable, "store unavailable")
 	}
+	// The access policies for host users decide how many approvals the
+	// request needs and how long it may last. With none matching it is
+	// still recorded, and approving it is refused.
+	dec, incident, err := s.DB.DecideAccess(ctx, store.DefaultTenant, a.id, pam.Request{
+		Username: req.User, Role: iam.HostRole, Kind: pam.JITSudo, Account: req.User})
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, "store unavailable")
+	}
+	d := ElevationDuration(req.DurationSeconds)
+	if dec.Allowed {
+		d = min(d, dec.Duration(int(d.Minutes())))
+	}
 	e := &store.Elevation{
 		ID: newAgentID(), AgentID: a.id, Hostname: a.hostname, Username: req.User, UID: int64(req.Uid),
-		Reason: reason, DurationSeconds: int64(ElevationDuration(req.DurationSeconds).Seconds()), RequestedBy: req.User,
+		Reason: reason, DurationSeconds: int64(d.Seconds()), RequestedBy: req.User, Kind: pam.JITSudo,
+		PolicyID: dec.PolicyID, PolicyName: dec.PolicyName, ApprovalsRequired: max(dec.Approvals, 1), Incident: incident,
+	}
+	if !dec.Allowed {
+		e.PolicyID, e.PolicyName = 0, ""
 	}
 	if err := s.DB.CreateElevation(ctx, e); err != nil {
 		s.Log.Error("create elevation request", "agent_id", a.id, "err", err)
 		return nil, status.Error(codes.Unavailable, "store unavailable")
 	}
 	s.Log.Info("elevation requested", "request_id", e.ID, "hostname", a.hostname, "user", e.Username, "reason", reason)
+	if !dec.Allowed {
+		// Matches the API's check, which refuses to approve it.
+		_ = s.DB.SetElevationStatus(ctx, e.ID, []string{"pending"}, "pending", "", "no access policy allows sudo for host users on this server")
+	}
 	e.Status = "pending"
 	return elevationStatus(e), nil
 }
@@ -182,9 +205,23 @@ func (s *Agents) UploadSessionRecording(ctx context.Context, req *xdrv1.SessionR
 	if sess.Output == nil {
 		sess.Output = []byte{}
 	}
-	if err := s.DB.SaveSession(ctx, sess); err != nil {
+	recID, err := s.DB.SaveSession(ctx, sess)
+	if err != nil {
 		s.Log.Error("save session recording", "agent_id", a.id, "err", err)
 		return nil, status.Error(codes.Unavailable, "store unavailable")
+	}
+	if recID != 0 {
+		// A sudo session on the host is a privileged session too.
+		risk, why := pam.Risk(pam.SessionFacts{Account: sess.RunasUser, Start: start})
+		as := &store.AccessSession{
+			ID: "sudo-" + strconv.FormatInt(recID, 10), Username: sess.Username, AgentID: a.id, Hostname: a.hostname,
+			Protocol: "sudo", Account: sess.RunasUser, AuthMethod: "local", RequestID: sess.RequestID, RecordingID: recID,
+			StartedAt: start, EndedAt: start.Add(time.Duration(sess.DurationMs) * time.Millisecond), EndReason: "ended",
+			RiskScore: risk, RiskReasons: why,
+		}
+		if err := s.DB.StartAccessSession(ctx, as); err != nil {
+			s.Log.Error("record sudo session", "agent_id", a.id, "err", err)
+		}
 	}
 	s.Log.Info("sudo session recorded", "hostname", a.hostname, "user", sess.Username, "command", sess.Command, "request_id", sess.RequestID)
 	return &xdrv1.SessionRecordingAck{}, nil

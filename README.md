@@ -65,9 +65,10 @@ service on the host.
  └──────────────────────────────────────────────────────────────┘
 ```
 
-* **Agent** (`cmd/xdr-agent`, Go): collectors push events into a bounded queue;
-  the sender ships acknowledged batches with retry and backoff. If the
-  server is unreachable the agent keeps running and counts dropped events.
+* **Agent** (`agent-rs/`, Rust): collectors feed an event bus and a durable
+  SQLite queue; the uploader ships acknowledged batches with retry and
+  backoff, so events survive a console outage. Features still being ported
+  from the retired Go agent are listed in `docs/architecture.md`.
 * **Server** (`cmd/xdr-server`, Go): gRPC services for enrollment and ingest,
   REST API and the built dashboard over HTTP.
 * **Console** (`web/`, React + TypeScript + Vite).

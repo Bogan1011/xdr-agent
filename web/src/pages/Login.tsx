@@ -1,10 +1,12 @@
 import { FormEvent, useState } from "react";
-import { api } from "../api";
+import { ApiError, api } from "../api";
 import { icons } from "../icons";
 
-export default function Login({ onLogin }: { onLogin: (user: string) => void }) {
+export default function Login({ onLogin }: { onLogin: () => void }) {
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [needCode, setNeedCode] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -13,9 +15,10 @@ export default function Login({ onLogin }: { onLogin: (user: string) => void }) 
     setBusy(true);
     setError("");
     try {
-      const r = await api.login(username, password);
-      onLogin(r.username);
+      await api.login(username, password, code);
+      onLogin();
     } catch (err) {
+      if (err instanceof ApiError && err.data.mfa_required) setNeedCode(true);
       setError((err as Error).message);
     } finally {
       setBusy(false);
@@ -42,6 +45,19 @@ export default function Login({ onLogin }: { onLogin: (user: string) => void }) 
             autoFocus
           />
         </label>
+        {needCode && (
+          <label>
+            Authenticator code
+            <input
+              className="mono"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              autoFocus
+            />
+          </label>
+        )}
         {error && <div className="error">{error}</div>}
         <button className="primary" disabled={busy}>
           {busy ? "Signing in…" : "Sign in"}

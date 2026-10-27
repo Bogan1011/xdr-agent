@@ -1,10 +1,12 @@
-//! xdr-agent-rs: the Rust endpoint agent. Usage:
+//! xdr-agent: the endpoint agent. Usage:
 //!
-//!   xdr-agent-rs [--config /etc/xdr-agent/agent.yaml] [--state-dir DIR] [--enrollment-token TOKEN]
+//!   xdr-agent [--config /etc/xdr-agent/agent.yaml] [--state-dir DIR] [--enrollment-token TOKEN]
+//!   xdr-agent -version
+//!   xdr-agent maintenance [--token T | --password P]
 //!
-//! It reads the Go agent's config file. Until it reaches feature parity it
-//! runs beside the Go agent with its own state directory and enrollment, so
-//! it shows up as a second endpoint in the console.
+//! It replaced the Go agent in place: same binary path, unit, config, state
+//! directory and identity, so a Go endpoint moves to it with a console
+//! update and keeps its agent ID.
 
 use std::path::PathBuf;
 
@@ -16,22 +18,32 @@ fn main() -> Result<()> {
     let mut config = PathBuf::from("/etc/xdr-agent/agent.yaml");
     let mut state_dir: Option<PathBuf> = None;
     let mut token: Option<String> = None;
-    let mut args = std::env::args().skip(1);
+    let mut args = std::env::args().skip(1).peekable();
+    if args.peek().map(String::as_str) == Some("maintenance") {
+        // The console's scripts call this before reinstalling or removing a
+        // tamper-protected agent. Tamper protection is not ported yet, so
+        // there is nothing to unlock but the Go agent's leftovers.
+        xdr_linux::migrate::release_tamper();
+        println!("tamper protection is not active; maintenance not needed");
+        return Ok(());
+    }
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--config" => config = args.next().map(PathBuf::from).unwrap_or(config),
+            "--config" | "-config" => config = args.next().map(PathBuf::from).unwrap_or(config),
             "--state-dir" => state_dir = args.next().map(PathBuf::from),
             "--enrollment-token" => token = args.next(),
-            "--version" => {
-                println!("xdr-agent-rs {}", xdr_core::VERSION);
+            // Exactly the version: the update check compares this output.
+            "--version" | "-version" => {
+                println!("{}", xdr_core::VERSION);
                 return Ok(());
             }
             other => bail!("unknown argument {other}"),
         }
     }
     let mut cfg = Config::load(&config)?;
-    // The Go agent's state directory holds its own identity; never share it.
-    cfg.state_dir = state_dir.unwrap_or_else(|| "/var/lib/xdr-agent-rs".into());
+    if let Some(d) = state_dir {
+        cfg.state_dir = d;
+    }
     if let Some(t) = token {
         cfg.enrollment_token = t;
     }
@@ -41,10 +53,13 @@ fn main() -> Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&cfg.log_level)))
         .init();
     tracing::info!(version = xdr_core::VERSION, config = %config.display(), state_dir = %cfg.state_dir.display(),
-        "xdr-agent-rs starting");
+        "xdr-agent starting");
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
         .build()?
-        .block_on(xdr_core::agent::run(cfg, xdr_linux::Linux::default()))
+        .block_on(async {
+            let platform = xdr_linux::Linux::new(&cfg);
+            xdr_core::agent::run(cfg, platform).await
+        })
 }

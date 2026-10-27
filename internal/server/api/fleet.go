@@ -35,8 +35,8 @@ func needsUpdate(ag *store.Agent, rel *release.Release) bool {
 	return !ag.Revoked && !ag.Updating && ag.AgentVersion != rel.Version && rel.SHA256[ag.Arch] != ""
 }
 
-func (a *API) queueUpdate(ctx context.Context, ag *store.Agent, rel *release.Release) error {
-	c := &store.Command{AgentID: ag.ID, Type: "update_agent", RequestedBy: a.cfg.AdminUser,
+func (a *API) queueUpdate(ctx context.Context, by string, ag *store.Agent, rel *release.Release) error {
+	c := &store.Command{AgentID: ag.ID, Type: "update_agent", RequestedBy: by,
 		Args: map[string]string{"version": rel.Version, "sha256": rel.SHA256[ag.Arch]}}
 	return a.detect.QueueCommand(ctx, c)
 }
@@ -55,7 +55,7 @@ func (a *API) updateAgent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "agent is revoked, already on "+rel.Version+", already updating, or its architecture has no build")
 		return
 	}
-	if a.fail(w, a.queueUpdate(r.Context(), ag, rel)) {
+	if a.fail(w, a.queueUpdate(r.Context(), actor(r), ag, rel)) {
 		return
 	}
 	a.log.Info("agent update queued", "agent_id", ag.ID, "from", ag.AgentVersion, "to", rel.Version)
@@ -78,7 +78,7 @@ func (a *API) updateAllAgents(w http.ResponseWriter, r *http.Request) {
 		if !needsUpdate(ag, rel) || !ag.Online {
 			continue
 		}
-		if err := a.queueUpdate(r.Context(), ag, rel); err != nil {
+		if err := a.queueUpdate(r.Context(), actor(r), ag, rel); err != nil {
 			a.log.Error("queue agent update", "agent_id", ag.ID, "err", err)
 			continue
 		}

@@ -108,6 +108,10 @@ func run(log *slog.Logger) error {
 	}
 	defer events.Close()
 
+	adminUser := env("XDR_ADMIN_USER", "admin")
+	if err := db.EnsureBootstrapAdmin(ctx, adminUser, adminPassword); err != nil {
+		return fmt.Errorf("bootstrap admin: %w", err)
+	}
 	if err := db.FailStaleDeployJobs(ctx); err != nil {
 		log.Warn("mark stale deploy jobs", "err", err)
 	}
@@ -163,13 +167,12 @@ func run(log *slog.Logger) error {
 	httpSrv := &http.Server{
 		Addr: env("XDR_HTTP_ADDR", ":8080"),
 		Handler: api.New(api.Config{
-			AdminUser:     env("XDR_ADMIN_USER", "admin"),
-			AdminPassword: adminPassword,
-			PublicHost:    publicHost,
-			EnrollPort:    enrollPort,
-			AgentPort:     agentPort,
-			WebDir:        env("XDR_WEB_DIR", ""),
-			DownloadsDir:  downloads,
+			AdminUser:    adminUser,
+			PublicHost:   publicHost,
+			EnrollPort:   enrollPort,
+			AgentPort:    agentPort,
+			WebDir:       env("XDR_WEB_DIR", ""),
+			DownloadsDir: downloads,
 		}, db, events, ca, &deploy.Deployer{DB: db, Log: log}, det, log).WithLive(hub).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

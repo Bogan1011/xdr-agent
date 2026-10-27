@@ -1,5 +1,5 @@
-//! Periodic heartbeat: reports host and agent health, receives policy and
-//! commands. The last policy is cached so a restart without the console
+//! Periodic heartbeat: reports host and agent health and isolation,
+//! receives policy and commands. The last policy is cached so a restart without the console
 //! still knows it.
 
 use std::sync::Arc;
@@ -7,8 +7,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use prost::Message;
+use tokio::sync::Notify;
 use tonic::transport::Channel;
 
+use crate::commands::Commands;
 use crate::pb::{self, agent_service_client::AgentServiceClient};
 use crate::platform::Platform;
 use crate::queue::Queue;
@@ -24,6 +26,9 @@ pub struct Heartbeat<P: Platform> {
     pub sent: Arc<AtomicU64>,
     pub bus_dropped: Arc<AtomicU64>,
     pub started: Instant,
+    pub commands: Arc<Commands<P>>,
+    /// Sends a heartbeat now instead of at the next tick.
+    pub wake: Arc<Notify>,
 }
 
 /// The last prevention policy received from the console, if any.
@@ -37,10 +42,14 @@ impl<P: Platform> Heartbeat<P> {
         let mut tick = tokio::time::interval(INTERVAL);
         let mut last_version = cached_policy(&self.queue).map(|p| p.version);
         loop {
-            tick.tick().await;
+            tokio::select! {
+                _ = tick.tick() => {}
+                _ = self.wake.notified() => {}
+            }
             let mut req = tonic::Request::new(pb::HeartbeatRequest {
                 host: Some(self.platform.host_info()),
                 stats: Some(self.stats()),
+                isolated: self.platform.isolated(),
                 ..Default::default()
             });
             req.set_timeout(Duration::from_secs(10));
@@ -62,27 +71,8 @@ impl<P: Platform> Heartbeat<P> {
                 let _ = self.queue.put(TAMPER_KEY, &t.encode_to_vec());
             }
             for c in resp.commands {
-                self.refuse(c).await;
+                self.commands.dispatch(c);
             }
-        }
-    }
-
-    /// Response actions are not ported to this agent yet; say so instead of
-    /// leaving the console waiting.
-    async fn refuse(&mut self, c: pb::AgentCommand) {
-        tracing::warn!(id = %c.id, r#type = ?c.r#type(), "command not supported by this agent yet");
-        let message = format!(
-            "{:?} is not supported by xdr-agent-rs {} yet",
-            c.r#type(),
-            crate::VERSION
-        );
-        let res = pb::CommandResult {
-            command_id: c.id,
-            success: false,
-            message,
-        };
-        if let Err(status) = self.client.report_command_result(res).await {
-            tracing::warn!(msg = status.message(), "reporting command result failed");
         }
     }
 

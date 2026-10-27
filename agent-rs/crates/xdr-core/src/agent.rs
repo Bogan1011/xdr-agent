@@ -1,5 +1,5 @@
-//! Wires the core together: identity, bus, queue, uploader, heartbeat and
-//! the platform's collectors.
+//! Wires the core together: identity, bus, queue, uploader, heartbeat, the
+//! live stream, response commands and the platform's collectors.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -9,8 +9,10 @@ use anyhow::Result;
 use tokio::sync::Notify;
 
 use crate::bus::{Bus, EventSink};
+use crate::commands::Commands;
 use crate::config::Config;
 use crate::heartbeat::{self, Heartbeat};
+use crate::live::Live;
 use crate::platform::{Collector, Platform};
 use crate::queue::Queue;
 use crate::uploader::Uploader;
@@ -25,6 +27,7 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
     if let Some(p) = heartbeat::cached_policy(&queue) {
         tracing::info!(name = %p.name, version = p.version, "last known policy loaded from cache");
     }
+    platform.restore();
 
     let id = loop {
         match identity::load_or_enroll(&cfg, platform.host_info()).await {
@@ -37,13 +40,16 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
     };
     tracing::info!(agent_id = %id.agent_id, "agent identity loaded");
     let client = transport::agent_client(&cfg, &id)?;
+    let hb_wake = Arc::new(Notify::new());
+    let commands = Arc::new(Commands::new(client.clone(), platform.clone(), hb_wake.clone()));
 
     let bus = Bus::new(20_000);
     let wake = Arc::new(Notify::new());
     let sent = Arc::new(AtomicU64::new(0));
     let bus_dropped = bus.dropped();
     for c in platform.collectors(&cfg) {
-        spawn_collector(c, bus.sink());
+        let sink = bus.sink().named(c.name());
+        spawn_collector(c, sink);
     }
     tokio::spawn(bus.run(id.agent_id.clone(), platform.resolver(), queue.clone(), wake.clone()));
     tokio::spawn(
@@ -64,6 +70,15 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
             sent,
             bus_dropped,
             started,
+            commands: commands.clone(),
+            wake: hb_wake,
+        }
+        .run(),
+    );
+    tokio::spawn(
+        Live {
+            client: transport::live_client(&cfg, &id)?,
+            commands,
         }
         .run(),
     );

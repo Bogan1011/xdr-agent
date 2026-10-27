@@ -5,7 +5,21 @@ import { XdrEvent, categoryOf, formatBytes, typeLabels } from "../api";
 // Policy module events keep the action in path and the detail in args.
 const policyTypes = new Set(["web_reputation", "intrusion", "device_control", "app_control"]);
 
+// Telemetry spec fields shown in the detail view when an event has them.
+const extraFields: [string, string][] = [
+  ["category", "Category"], ["action", "Action"], ["outcome", "Outcome"], ["direction", "Direction"],
+  ["dns_query", "DNS query"], ["dns_type", "Query type"], ["dns_rcode", "Response"], ["dns_answers", "Answers"],
+  ["target_user", "Target user"], ["target_pid", "Target PID"], ["old_value", "Old value"], ["new_value", "New value"],
+  ["group", "Group"], ["euid", "Effective uid"], ["tty", "Terminal"], ["session_id", "Session"],
+  ["capabilities", "Capabilities"], ["duration_ms", "Ran for (ms)"], ["md5", "MD5"], ["sha1", "SHA-1"],
+  ["inode", "Inode"], ["owner", "Owner"], ["filesystem", "File system"], ["mount_point", "Mount point"],
+  ["container_id", "Container"], ["container_name", "Container name"], ["container_image", "Image"],
+  ["pod_name", "Pod"], ["pod_namespace", "K8s namespace"], ["pid_ns", "PID namespace"], ["net_ns", "Net namespace"],
+  ["collector", "Collector"],
+];
+
 function summary(e: XdrEvent): string {
+  if (e.summary) return e.summary;
   if (policyTypes.has(e.type)) {
     const what = e.type === "app_control" ? e.exe : e.remote_addr || "";
     return `${e.path[0]?.toUpperCase() ?? ""}${e.path.slice(1)}${what ? ` ${what}` : ""}: ${e.args}`;
@@ -67,6 +81,12 @@ function Detail({ e }: { e: XdrEvent }) {
     );
   }
   if (e.sha256) rows.push(["SHA-256", e.sha256]);
+  if (e.summary) rows.unshift(["Summary", e.summary]);
+  for (const [key, label] of extraFields) {
+    const v = e[key];
+    if (v === undefined || v === "" || v === 0 || (Array.isArray(v) && v.length === 0)) continue;
+    rows.push([label, Array.isArray(v) ? v.join("\n") : String(v)]);
+  }
   return (
     <dl className="detail">
       {rows.map(([k, v]) => (

@@ -51,7 +51,7 @@ GOT="$(openssl x509 -in "$TMP/ca.crt" -outform der | sha256sum | cut -d' ' -f1)"
 [[ "${GOT,,}" == "${CA_SHA256,,}" ]] || die "CA fingerprint mismatch (got $GOT); refusing to install"
 
 echo "==> Downloading agent ($ARCH)"
-curl -fsSL "$BASE_URL/downloads/xdr-agent-linux-$ARCH" -o "$TMP/xdr-agent"
+curl -fsSL "$BASE_URL/downloads/xdr-agent-linux-$ARCH" -o "$TMP/xdr-agent" || die "this console has no agent build for $ARCH"
 curl -fsSL "$BASE_URL/downloads/SHA256SUMS" -o "$TMP/SHA256SUMS"
 WANT="$(grep " xdr-agent-linux-$ARCH\$" "$TMP/SHA256SUMS" | cut -d' ' -f1)"
 GOT="$(sha256sum "$TMP/xdr-agent" | cut -d' ' -f1)"

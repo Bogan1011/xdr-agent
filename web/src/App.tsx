@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { api } from "./api";
+import { Me, api, can } from "./api";
+import { MeContext } from "./me";
 import Login from "./pages/Login";
 import Overview from "./pages/Overview";
 import Endpoints from "./pages/Endpoints";
@@ -14,32 +15,43 @@ import IOCs from "./pages/IOCs";
 import PAM from "./pages/PAM";
 import Policies, { PolicyEditor } from "./pages/Policies";
 import RemoteAccess, { RemoteShell, WatchShell } from "./pages/RemoteAccess";
+import SessionDetail from "./pages/SessionDetail";
+import Audit from "./pages/Audit";
+import Admin from "./pages/Admin";
+import AccessPolicies from "./pages/AccessPolicies";
+import Profile from "./pages/Profile";
 import { usePoll } from "./hooks";
 import { icons } from "./icons";
 
 export default function App() {
-  const [user, setUser] = useState<string | null | undefined>(undefined);
+  const [me, setMe] = useState<Me | null | undefined>(undefined);
+  const load = () => api.me().then(setMe).catch(() => setMe(null));
 
   useEffect(() => {
-    api.me().then((m) => setUser(m.username)).catch(() => setUser(null));
-    const onUnauthorized = () => setUser(null);
+    load();
+    const onUnauthorized = () => setMe(null);
     window.addEventListener("xdr:unauthorized", onUnauthorized);
     return () => window.removeEventListener("xdr:unauthorized", onUnauthorized);
   }, []);
 
-  if (user === undefined) return null;
-  if (user === null) return <Login onLogin={setUser} />;
-  return <Shell user={user} onSignOut={() => setUser(null)} />;
+  if (me === undefined) return null;
+  if (me === null) return <Login onLogin={load} />;
+  return (
+    <MeContext.Provider value={me}>
+      <Shell me={me} onSignOut={() => setMe(null)} />
+    </MeContext.Provider>
+  );
 }
 
-type NavItem = { to: string; label: string; end?: boolean; badge?: number };
+type NavItem = { to: string; label: string; end?: boolean; badge?: number; perm?: string };
 type NavGroup = { title: string; icon: keyof typeof icons; items: NavItem[] };
 
-function Shell({ user, onSignOut }: { user: string; onSignOut: () => void }) {
+function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
+  const user = me.display_name || me.username;
   const pam = usePoll(api.pamSummary, 15000);
   const location = useLocation();
 
-  const groups: NavGroup[] = [
+  const groups = ([
     { title: "Dashboard", icon: "dashboard", items: [{ to: "/", label: "Security overview", end: true }] },
     {
       title: "XDR",
@@ -64,11 +76,22 @@ function Shell({ user, onSignOut }: { user: string; onSignOut: () => void }) {
       title: "Identity & access",
       icon: "key",
       items: [
-        { to: "/remote", label: "Remote access" },
+        { to: "/remote", label: "Remote access", perm: "access.request" },
         { to: "/pam", label: "Privileged access", badge: pam.data?.pending || undefined },
+        { to: "/audit", label: "Audit log", perm: "audit.view" },
       ],
     },
-  ];
+    {
+      title: "Administration",
+      icon: "admin",
+      items: [
+        { to: "/admin/users", label: "Users & roles", perm: "iam.manage" },
+        { to: "/admin/access", label: "Access policies" },
+      ],
+    },
+  ] as NavGroup[])
+    .map((g) => ({ ...g, items: g.items.filter((it) => !it.perm || can(me, it.perm)) }))
+    .filter((g) => g.items.length > 0);
 
   const isActive = (it: NavItem) =>
     it.end ? location.pathname === it.to : location.pathname === it.to || location.pathname.startsWith(it.to + "/");
@@ -106,7 +129,7 @@ function Shell({ user, onSignOut }: { user: string; onSignOut: () => void }) {
         </nav>
         <div className="rail-foot">
           <span className="rail-icon avatar" aria-hidden>{user.slice(0, 1).toUpperCase()}</span>
-          <span className="rail-label">{user}</span>
+          <NavLink to="/profile" className="rail-label">{user}</NavLink>
         </div>
       </aside>
       <div className="main">
@@ -122,7 +145,7 @@ function Shell({ user, onSignOut }: { user: string; onSignOut: () => void }) {
           </div>
           <div className="topbar-right">
             <span className="live"><span className="pulse" aria-hidden /> Live</span>
-            <span className="muted">{user}</span>
+            <NavLink to="/profile" className="muted">{user} · {me.role_id}</NavLink>
             <button className="ghost" onClick={() => api.logout().finally(onSignOut)}>Sign out</button>
           </div>
         </header>
@@ -144,6 +167,11 @@ function Shell({ user, onSignOut }: { user: string; onSignOut: () => void }) {
             <Route path="/remote" element={<RemoteAccess />} />
             <Route path="/remote/:id" element={<RemoteShell />} />
             <Route path="/remote/watch/:sid" element={<WatchShell />} />
+            <Route path="/pam/sessions/:id" element={<SessionDetail />} />
+            <Route path="/audit" element={<Audit />} />
+            <Route path="/admin/users" element={<Admin />} />
+            <Route path="/admin/access" element={<AccessPolicies />} />
+            <Route path="/profile" element={<Profile />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

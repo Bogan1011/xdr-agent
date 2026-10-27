@@ -15,7 +15,7 @@ use xdr_core::bus::{EventSink, new_event};
 use xdr_core::pb::{self, EventType};
 use xdr_core::platform::Collector;
 
-use crate::procfs::Hasher;
+use crate::procfs::{self, Hasher};
 
 pub struct File {
     pub paths: Vec<String>,
@@ -140,9 +140,17 @@ impl File {
             fe.size = md.size();
             fe.mode = md.mode();
             fe.uid = md.uid();
+            fe.gid = md.gid();
+            fe.inode = md.ino();
+            fe.device = md.dev();
+            fe.owner = procfs::username(md.uid());
             if md.is_file() && matches!(t, EventType::FileModify | EventType::FileRename | EventType::FileCreate) {
-                fe.sha256 = self.hasher.hash(&fe.path);
+                let h = self.hasher.hashes(&fe.path);
+                (fe.sha256, fe.sha1, fe.md5) = (h.sha256, h.sha1, h.md5);
             }
+        }
+        if let Some(m) = procfs::mount_of(&fe.path) {
+            (fe.mount_point, fe.filesystem) = (m.point, m.fstype);
         }
         let mut e = new_event(t);
         e.payload = Some(pb::event::Payload::File(fe));

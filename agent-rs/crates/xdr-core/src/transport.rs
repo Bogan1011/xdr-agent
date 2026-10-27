@@ -14,12 +14,16 @@ use crate::pb::agent_service_client::AgentServiceClient;
 const MAX_RECV: usize = 32 << 20;
 
 fn endpoint(addr: &str, tls: ClientTlsConfig) -> Result<Endpoint> {
+    Ok(base_endpoint(addr, tls)?
+        // Enforced on the client: grpc-timeout alone lets a call wait for a
+        // reconnect for as long as the console is down.
+        .timeout(Duration::from_secs(30)))
+}
+
+fn base_endpoint(addr: &str, tls: ClientTlsConfig) -> Result<Endpoint> {
     Ok(Endpoint::from_shared(format!("https://{addr}"))?
         .tls_config(tls)?
         .connect_timeout(Duration::from_secs(15))
-        // Enforced on the client: grpc-timeout alone lets a call wait for a
-        // reconnect for as long as the console is down.
-        .timeout(Duration::from_secs(30))
         .http2_keep_alive_interval(Duration::from_secs(60))
         .keep_alive_timeout(Duration::from_secs(20))
         .keep_alive_while_idle(true))
@@ -35,12 +39,25 @@ pub async fn enroll_channel(cfg: &Config, ca_pem: &[u8]) -> Result<Channel> {
 /// A lazily connected channel: calls fail while the console is unreachable
 /// and succeed again once it is back, without rebuilding the client.
 pub fn agent_client(cfg: &Config, id: &Identity) -> Result<AgentServiceClient<Channel>> {
-    let tls = ClientTlsConfig::new()
+    client(endpoint(&cfg.server, agent_tls(cfg, id))?)
+}
+
+/// A client for the long-lived Live stream: no per-call timeout, because the
+/// console sends no response headers until it has something to push. Dead
+/// connections are still caught by HTTP/2 keepalive.
+pub fn live_client(cfg: &Config, id: &Identity) -> Result<AgentServiceClient<Channel>> {
+    client(base_endpoint(&cfg.server, agent_tls(cfg, id))?)
+}
+
+fn agent_tls(cfg: &Config, id: &Identity) -> ClientTlsConfig {
+    ClientTlsConfig::new()
         .ca_certificate(Certificate::from_pem(&id.ca_pem))
         .identity(TlsIdentity::from_pem(&id.cert_pem, &id.key_pem))
-        .domain_name(cfg.tls_name(&cfg.server));
-    let channel = endpoint(&cfg.server, tls)?.connect_lazy();
-    Ok(AgentServiceClient::new(channel)
+        .domain_name(cfg.tls_name(&cfg.server))
+}
+
+fn client(ep: Endpoint) -> Result<AgentServiceClient<Channel>> {
+    Ok(AgentServiceClient::new(ep.connect_lazy())
         .send_compressed(tonic::codec::CompressionEncoding::Gzip)
         .accept_compressed(tonic::codec::CompressionEncoding::Gzip)
         .max_decoding_message_size(MAX_RECV))

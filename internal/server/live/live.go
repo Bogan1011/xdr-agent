@@ -52,6 +52,9 @@ type Hub struct {
 	// Commands enables pushing response commands; nil leaves them to the
 	// heartbeat.
 	Commands CommandStore
+	// Ended runs after a remote shell ended and its recording was saved
+	// (recordingID 0 when it was not).
+	Ended func(s *Shell, recordingID int64, reason string)
 
 	mu     sync.Mutex
 	agents map[string]*conn
@@ -320,13 +323,15 @@ func (h *Hub) Activity(ctx context.Context, agentID string) (*xdrv1.Activity, er
 
 // Shell is a remote shell opened from the console.
 type Shell struct {
-	ID       string    `json:"id"`
-	AgentID  string    `json:"agent_id"`
-	Hostname string    `json:"hostname"`
-	User     string    `json:"user"`
-	Admin    string    `json:"admin"`
-	Started  time.Time `json:"started_at"`
-	Viewers  int       `json:"viewers"`
+	ID       string `json:"id"`
+	AgentID  string `json:"agent_id"`
+	Hostname string `json:"hostname"`
+	User     string `json:"user"`
+	Admin    string `json:"admin"`
+	// RequestID is the access request the shell was opened under.
+	RequestID string    `json:"request_id"`
+	Started   time.Time `json:"started_at"`
+	Viewers   int       `json:"viewers"`
 
 	conn *conn
 	done chan struct{}
@@ -340,13 +345,13 @@ type Shell struct {
 }
 
 // Open starts a login shell for user on the agent.
-func (h *Hub) Open(agentID, user, admin string, cols, rows uint32) (*Shell, error) {
+func (h *Hub) Open(agentID, user, admin, requestID string, cols, rows uint32) (*Shell, error) {
 	c := h.conn(agentID)
 	if c == nil {
 		return nil, ErrOffline
 	}
 	s := &Shell{
-		ID: newID(), AgentID: agentID, Hostname: c.hostname, User: user, Admin: admin, Started: time.Now().UTC(),
+		ID: newID(), AgentID: agentID, Hostname: c.hostname, User: user, Admin: admin, RequestID: requestID, Started: time.Now().UTC(),
 		conn: c, done: make(chan struct{}), subs: map[chan []byte]bool{},
 	}
 	h.mu.Lock()
@@ -383,7 +388,7 @@ func (h *Hub) Shells(agentID string) []Shell {
 		if agentID == "" || s.AgentID == agentID {
 			s.mu.Lock()
 			out = append(out, Shell{ID: s.ID, AgentID: s.AgentID, Hostname: s.Hostname, User: s.User,
-				Admin: s.Admin, Started: s.Started, Viewers: len(s.subs)})
+				Admin: s.Admin, RequestID: s.RequestID, Started: s.Started, Viewers: len(s.subs)})
 			s.mu.Unlock()
 		}
 	}
@@ -494,13 +499,16 @@ func (h *Hub) end(s *Shell, reason string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	err := h.DB.SaveSession(ctx, &store.Session{
+	recID, err := h.DB.SaveSession(ctx, &store.Session{
 		AgentID: s.AgentID, Hostname: s.Hostname, SessionID: "console-" + s.ID, Username: s.Admin, RunasUser: s.User,
 		TTY: "console", Command: "Remote shell from the XDR console", StartedAt: s.Started,
 		DurationMs: dur.Milliseconds(), Output: rec, Truncated: truncated,
 	})
 	if err != nil {
 		h.Log.Error("save remote shell recording", "session", s.ID, "err", err)
+	}
+	if h.Ended != nil {
+		h.Ended(s, recID, reason)
 	}
 }
 

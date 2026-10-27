@@ -3,3 +3,4 @@ web/dist
 bin
 deploy/.env
 .git
+agent-rs/target

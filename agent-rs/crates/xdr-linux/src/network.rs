@@ -1,5 +1,6 @@
-//! New TCP connections and listening sockets from /proc/net, attributed to a
-//! process through socket inodes. Polling can miss connections shorter than
+//! New TCP and UDP connections and listening sockets from /proc/net,
+//! attributed to a process through socket inodes. A connection to a local
+//! listening port is inbound (accept), anything else outbound (connect). Polling can miss connections shorter than
 //! the interval; the eBPF collector (ported later) closes that gap.
 
 use std::collections::{HashMap, HashSet};
@@ -16,6 +17,8 @@ use crate::procfs;
 
 const ESTABLISHED: &str = "01";
 const LISTEN: &str = "0A";
+/// TCP_CLOSE: how /proc/net/udp shows an unconnected (bound) UDP socket.
+const UDP_UNCONNECTED: &str = "07";
 
 pub struct Network {
     pub interval: Duration,
@@ -45,6 +48,13 @@ impl Collector for Network {
         loop {
             let mut socks = read_sockets("/proc/net/tcp", "tcp");
             socks.extend(read_sockets("/proc/net/tcp6", "tcp6"));
+            socks.extend(read_sockets("/proc/net/udp", "udp"));
+            socks.extend(read_sockets("/proc/net/udp6", "udp6"));
+            let listening: HashSet<(&str, u32)> = socks
+                .iter()
+                .filter(|s| s.state == LISTEN)
+                .map(|s| (family(s.proto), s.local_port))
+                .collect();
             let current: HashSet<u64> = socks.iter().filter(|s| s.inode != 0).map(|s| s.inode).collect();
             let fresh: Vec<&Sock> = socks
                 .iter()
@@ -60,7 +70,8 @@ impl Collector for Network {
                     }
                     let pid = owners.get(&s.inode).copied().unwrap_or(0);
                     if pid != me {
-                        emit(sink, s, pid);
+                        let inbound = s.state != LISTEN && listening.contains(&(family(s.proto), s.local_port));
+                        emit(sink, s, pid, inbound);
                     }
                 }
             }
@@ -71,11 +82,18 @@ impl Collector for Network {
     }
 }
 
-fn emit(sink: &EventSink, s: &Sock, pid: u32) {
-    let t = if s.state == LISTEN {
-        EventType::NetListen
+/// "tcp" or "udp", so IPv4 and IPv6 sockets on one port match.
+fn family(proto: &str) -> &str {
+    proto.trim_end_matches('6')
+}
+
+fn emit(sink: &EventSink, s: &Sock, pid: u32, inbound: bool) {
+    let (t, direction) = if s.state == LISTEN {
+        (EventType::NetListen, "listen")
+    } else if inbound {
+        (EventType::NetAccept, "inbound")
     } else {
-        EventType::NetConnect
+        (EventType::NetConnect, "outbound")
     };
     let mut e = new_event(t);
     e.payload = Some(pb::event::Payload::Network(pb::NetworkEvent {
@@ -91,6 +109,9 @@ fn emit(sink: &EventSink, s: &Sock, pid: u32) {
             String::new()
         },
         uid: s.uid,
+        direction: direction.into(),
+        user: procfs::username(s.uid),
+        net_namespace: if pid != 0 { procfs::ns_inode(pid, "net") } else { 0 },
     }));
     sink.emit(e);
 }
@@ -108,13 +129,16 @@ fn parse_sockets(text: &str, proto: &'static str) -> Vec<Sock> {
         if f.len() < 10 {
             continue;
         }
-        let state = match f[3] {
-            ESTABLISHED => ESTABLISHED,
-            LISTEN => LISTEN,
-            _ => continue,
-        };
         let (local, local_port) = parse_addr(f[1]);
         let (remote, remote_port) = parse_addr(f[2]);
+        let udp = proto.starts_with("udp");
+        let state = match f[3] {
+            ESTABLISHED => ESTABLISHED,
+            LISTEN if !udp => LISTEN,
+            // A bound UDP socket serves like a TCP listener.
+            UDP_UNCONNECTED if udp && remote_port == 0 && local_port != 0 => LISTEN,
+            _ => continue,
+        };
         out.push(Sock {
             proto,
             state,
@@ -204,5 +228,12 @@ mod tests {
             ("127.0.0.1".into(), 80)
         );
         assert_eq!(parse_addr("00000000000000000000000001000000:0050").0, "::1");
+        let u = parse_sockets(
+            "  sl local rem st\n  1: 00000000:0035 00000000:0000 07 00000000:00000000 00:00000000 00000000 0 0 55 2\n  2: 0100007F:A000 08080808:0035 01 00000000:00000000 00:00000000 00000000 0 0 56 2\n",
+            "udp",
+        );
+        assert_eq!((u[0].state, u[0].local_port), (LISTEN, 53));
+        assert_eq!((u[1].state, u[1].remote.as_str()), (ESTABLISHED, "8.8.8.8"));
+        assert_eq!(family("tcp6"), "tcp");
     }
 }
