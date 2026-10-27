@@ -20,6 +20,7 @@ import (
 
 	xdrv1 "github.com/Bogan1011/xdr-agent/gen/xdr/v1"
 	"github.com/Bogan1011/xdr-agent/internal/agent/collector"
+	"github.com/Bogan1011/xdr-agent/internal/policy"
 )
 
 // Tamper protection raises the bar for stopping or removing the agent without
@@ -31,8 +32,9 @@ import (
 //   - SIGTERM and friends are ignored unless the host is shutting down;
 //   - a restart after SIGKILL or a crash is reported.
 //
-// The console's maintenance token suspends it locally
-// (xdr-agent maintenance --token ...), e.g. to uninstall without the console.
+// The console's maintenance token, or the policy's admin password, suspends
+// it locally (xdr-agent maintenance --token ... or --password ...), e.g. to
+// uninstall without the console.
 
 const (
 	unitFile       = "/etc/systemd/system/xdr-agent.service"
@@ -44,8 +46,15 @@ const (
 )
 
 type tamperPolicy struct {
-	Enabled     bool   `json:"enabled"`
-	TokenSHA256 string `json:"token_sha256"`
+	Enabled      bool   `json:"enabled"`
+	TokenSHA256  string `json:"token_sha256"`
+	PasswordSalt string `json:"password_salt,omitempty"`
+	PasswordHash string `json:"password_hash,omitempty"`
+}
+
+// unlocks reports whether secret is the maintenance token or the admin password.
+func (p tamperPolicy) unlocks(secret string) bool {
+	return tokenMatches(secret, p.TokenSHA256) || policy.PasswordMatches(secret, p.PasswordSalt, p.PasswordHash)
 }
 
 type maintenance struct {
@@ -99,7 +108,7 @@ func (t *Tamper) SetPolicy(p *xdrv1.TamperPolicy) {
 	if p == nil {
 		return
 	}
-	np := tamperPolicy{Enabled: p.Enabled, TokenSHA256: p.MaintenanceTokenSha256}
+	np := tamperPolicy{Enabled: p.Enabled, TokenSHA256: p.MaintenanceTokenSha256, PasswordSalt: p.PasswordSalt, PasswordHash: p.PasswordHash}
 	t.mu.Lock()
 	changed := np != t.policy
 	t.policy = np
@@ -251,15 +260,15 @@ func (t *Tamper) maintenanceActive() bool {
 		return false
 	}
 	t.mu.Lock()
-	hash := t.policy.TokenSHA256
+	pol := t.policy
 	first := !m.Until.Equal(t.maintTill)
 	t.mu.Unlock()
-	if !tokenMatches(m.Token, hash) {
+	if !pol.unlocks(m.Token) {
 		if first {
 			t.mu.Lock()
 			t.maintTill = m.Until
 			t.mu.Unlock()
-			t.event("maintenance_rejected", "maintenance file with a wrong token")
+			t.event("maintenance_rejected", "maintenance file with a wrong token or password")
 		}
 		return false
 	}
@@ -267,7 +276,7 @@ func (t *Tamper) maintenanceActive() bool {
 		t.mu.Lock()
 		t.maintTill = m.Until
 		t.mu.Unlock()
-		t.event("maintenance", "tamper protection suspended locally with the maintenance token until "+m.Until.Format(time.RFC3339))
+		t.event("maintenance", "tamper protection suspended locally with the maintenance token or admin password until "+m.Until.Format(time.RFC3339))
 	}
 	return true
 }
@@ -288,8 +297,8 @@ func EnterMaintenance(cfg *Config, token string, d time.Duration) (string, error
 	if !t.policy.Enabled && !fileExists(dropInFile) {
 		return "tamper protection is off; nothing to do", nil
 	}
-	if !tokenMatches(token, t.policy.TokenSHA256) {
-		return "", errors.New("wrong maintenance token (copy it from the endpoint's page in the console)")
+	if !t.policy.unlocks(token) {
+		return "", errors.New("wrong maintenance token or password (the token is on the endpoint's page in the console; the password is set in the policy's Self-protection module)")
 	}
 	until := time.Now().Add(d).UTC()
 	raw, _ := json.Marshal(maintenance{Token: token, Until: until})

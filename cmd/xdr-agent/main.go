@@ -75,6 +75,7 @@ func maintenance(args []string) {
 	fs := flag.NewFlagSet("maintenance", flag.ExitOnError)
 	cfgPath := fs.String("config", "/etc/xdr-agent/agent.yaml", "path to the agent config")
 	token := fs.String("token", "", "maintenance token from the endpoint's page in the console")
+	password := fs.String("password", "", "self-protection password set in the endpoint's policy")
 	d := fs.Duration("duration", time.Hour, "how long protection stays suspended")
 	_ = fs.Parse(args)
 	cfg, err := agent.LoadConfig(*cfgPath)
@@ -82,7 +83,11 @@ func maintenance(args []string) {
 		fmt.Fprintln(os.Stderr, "xdr-agent:", err)
 		os.Exit(1)
 	}
-	msg, err := agent.EnterMaintenance(cfg, *token, *d)
+	secret := *token
+	if secret == "" {
+		secret = *password
+	}
+	msg, err := agent.EnterMaintenance(cfg, secret, *d)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "xdr-agent:", err)
 		os.Exit(1)

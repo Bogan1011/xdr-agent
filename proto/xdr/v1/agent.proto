@@ -114,6 +114,19 @@ message PreventionPolicy {
   ApplicationControlPolicy application_control = 9;
   // The console's name for the policy, shown in the agent's log.
   string name = 10;
+  SelfProtectionPolicy self_protection = 11;
+}
+
+// Deep Security-style agent self-protection set for every endpoint in a
+// policy: tamper protection on, unlocked locally with an admin password.
+message SelfProtectionPolicy {
+  // Turn tamper protection on, in addition to the per-endpoint switch.
+  bool enabled = 1;
+  // Console input only: the server hashes it and stores salt and hash.
+  string new_password = 2;
+  // PBKDF2-SHA256 of the password, hex.
+  string password_salt = 3;
+  string password_hash = 4;
 }
 
 message AntiMalwarePolicy {
@@ -151,7 +164,7 @@ message IntrusionPreventionPolicy {
 
 message DeviceControlPolicy {
   bool enabled = 1;
-  // USB mass storage: allow or block.
+  // USB mass storage: allow, read_only or block.
   string usb_storage = 2;
   // vendor:product IDs (hex, e.g. "0781:5583") that are always allowed.
   repeated string allowed_devices = 3;
@@ -248,6 +261,10 @@ message TamperPolicy {
   bool enabled = 1;
   // SHA-256 (hex) of the maintenance token that unlocks the agent locally.
   string maintenance_token_sha256 = 2;
+  // The policy's admin password (PBKDF2-SHA256, hex), which unlocks the
+  // agent locally like the maintenance token.
+  string password_salt = 3;
+  string password_hash = 4;
 }
 
 enum CommandType {

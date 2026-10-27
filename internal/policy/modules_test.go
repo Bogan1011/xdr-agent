@@ -24,7 +24,8 @@ func TestValidateModules(t *testing.T) {
 			p.DeviceControl.UsbStorage = "block"
 			p.DeviceControl.AllowedDevices = []string{"0781:5583"}
 		}, true},
-		{"usb mode", func(p *xdrv1.PreventionPolicy) { p.DeviceControl.UsbStorage = "read_only" }, false},
+		{"usb read only", func(p *xdrv1.PreventionPolicy) { p.DeviceControl.UsbStorage = "read_only" }, true},
+		{"usb mode", func(p *xdrv1.PreventionPolicy) { p.DeviceControl.UsbStorage = "readonly" }, false},
 		{"usb id", func(p *xdrv1.PreventionPolicy) { p.DeviceControl.AllowedDevices = []string{"sandisk"} }, false},
 		{"app empty", func(p *xdrv1.PreventionPolicy) { p.ApplicationControl.Enabled = true }, false},
 		{"app path", func(p *xdrv1.PreventionPolicy) {
@@ -119,5 +120,29 @@ func TestLockdownAndScripts(t *testing.T) {
 	}
 	if !ScriptOpened([]string{"bash", "-x", "./x.sh"}, "/tmp", "/tmp/x.sh") || ScriptOpened([]string{"bash"}, "/tmp", "/tmp/x.sh") {
 		t.Error("ScriptOpened")
+	}
+}
+
+func TestSelfProtectionPassword(t *testing.T) {
+	p := Default()
+	p.DeviceControl.UsbStorage = USBStorageReadOnly
+	p.SelfProtection.Enabled = true
+	if err := Validate(p); err == nil {
+		t.Fatal("protection without a password accepted")
+	}
+	p.SelfProtection.NewPassword = "short"
+	if err := SetPassword(p.SelfProtection); err == nil {
+		t.Fatal("short password accepted")
+	}
+	p.SelfProtection.NewPassword = "correct horse"
+	if err := SetPassword(p.SelfProtection); err != nil {
+		t.Fatal(err)
+	}
+	sp := p.SelfProtection
+	if sp.NewPassword != "" || len(sp.PasswordHash) != 64 || Validate(p) != nil {
+		t.Fatalf("stored %+v", sp)
+	}
+	if !PasswordMatches("correct horse", sp.PasswordSalt, sp.PasswordHash) || PasswordMatches("wrong horse!", sp.PasswordSalt, sp.PasswordHash) {
+		t.Error("PasswordMatches")
 	}
 }

@@ -112,3 +112,33 @@ func TestDeviceControlBlocksStorage(t *testing.T) {
 		t.Fatal("allowed device not re-authorized")
 	}
 }
+
+func TestDeviceControlReadOnly(t *testing.T) {
+	root := t.TempDir()
+	dev := filepath.Join(root, "1-1")
+	os.MkdirAll(filepath.Join(dev, "1-1:1.0", "host3", "target3:0:0", "3:0:0:0", "block", "sdb", "sdb1"), 0o755)
+	os.WriteFile(filepath.Join(dev, "idVendor"), []byte("0781\n"), 0o644)
+	os.WriteFile(filepath.Join(dev, "idProduct"), []byte("5583\n"), 0o644)
+	os.WriteFile(filepath.Join(dev, "authorized"), []byte("1\n"), 0o644)
+	os.WriteFile(filepath.Join(dev, "1-1:1.0", "bInterfaceClass"), []byte("08\n"), 0o644)
+
+	ro := map[string]bool{}
+	s := &sink{}
+	d := NewDeviceControl(slog.Default(), s.emit, filepath.Join(t.TempDir(), "devctl.json"))
+	d.Root = root
+	d.SetReadOnly = func(b string, on bool) error { ro[b] = on; return nil }
+	d.SetPolicy(&xdrv1.DeviceControlPolicy{Enabled: true, UsbStorage: "read_only"})
+	d.scan()
+	d.scan()
+	if !ro["sdb"] || !ro["sdb1"] || readSys(filepath.Join(dev, "authorized")) != "1" {
+		t.Fatalf("read-only = %v", ro)
+	}
+	if evs := s.take(); len(evs) != 1 || evs[0].GetPolicy().Action != "read_only" {
+		t.Fatalf("events = %v", evs)
+	}
+	d.SetPolicy(&xdrv1.DeviceControlPolicy{Enabled: true, UsbStorage: "allow"})
+	d.scan()
+	if ro["sdb"] || ro["sdb1"] {
+		t.Fatalf("not writable again: %v", ro)
+	}
+}

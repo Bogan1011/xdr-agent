@@ -35,6 +35,10 @@ func readPolicy(w http.ResponseWriter, raw json.RawMessage) ([]byte, bool) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return nil, false
 	}
+	if err := policy.SetPassword(p.SelfProtection); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return nil, false
+	}
 	p.Name = ""
 	return policy.MarshalJSON(p), true
 }
