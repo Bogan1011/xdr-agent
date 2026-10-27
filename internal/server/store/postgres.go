@@ -109,7 +109,10 @@ CREATE TABLE IF NOT EXISTS deploy_jobs (
 	if err := p.migratePAM(ctx); err != nil {
 		return err
 	}
-	return p.migratePrevention(ctx)
+	if err := p.migratePrevention(ctx); err != nil {
+		return err
+	}
+	return p.migrateTenancy(ctx)
 }
 
 type Agent struct {
@@ -194,16 +197,25 @@ func (p *Postgres) GetAgent(ctx context.Context, id string) (*Agent, error) {
 	return scanAgent(p.pool.QueryRow(ctx, `SELECT `+agentCols+` FROM agents WHERE id = $1`, id))
 }
 
-// AgentHostname returns an agent's hostname and revocation state, used to
-// authenticate and label events on ingest.
-func (p *Postgres) AgentHostname(ctx context.Context, id string) (string, bool, error) {
-	var host string
-	var revoked bool
-	err := p.pool.QueryRow(ctx, `SELECT hostname, revoked FROM agents WHERE id = $1`, id).Scan(&host, &revoked)
+// AgentIdentity is what the server trusts about an authenticated agent.
+type AgentIdentity struct {
+	Hostname string
+	TenantID string
+	// Revoked is true when the agent or the presented certificate is revoked.
+	Revoked bool
+}
+
+// AgentIdentity looks up the agent a verified certificate belongs to, used to
+// authorize calls and to label events on ingest.
+func (p *Postgres) AgentIdentity(ctx context.Context, id, certSerial string) (*AgentIdentity, error) {
+	ai := &AgentIdentity{}
+	err := p.pool.QueryRow(ctx, `SELECT a.hostname, a.tenant_id, a.revoked OR EXISTS (
+			SELECT 1 FROM agent_certificates c WHERE c.serial = $2 AND c.agent_id = a.id AND c.revoked_at IS NOT NULL)
+		FROM agents a WHERE a.id = $1`, id, certSerial).Scan(&ai.Hostname, &ai.TenantID, &ai.Revoked)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", false, ErrNotFound
+		return nil, ErrNotFound
 	}
-	return host, revoked, err
+	return ai, err
 }
 
 type HostUpdate struct {
@@ -211,12 +223,15 @@ type HostUpdate struct {
 	IPAddresses                                                    []string
 }
 
-func (p *Postgres) CreateAgent(ctx context.Context, id string, h HostUpdate, serial string, expires time.Time) error {
-	_, err := p.pool.Exec(ctx, `INSERT INTO agents (id, hostname, os, os_version, kernel, arch, ip_addresses,
+func (p *Postgres) CreateAgent(ctx context.Context, id, tenant string, h HostUpdate, serial string, expires time.Time) error {
+	_, err := p.pool.Exec(ctx, `INSERT INTO agents (id, tenant_id, hostname, os, os_version, kernel, arch, ip_addresses,
 		agent_version, machine_id, cert_serial, cert_expires, last_seen)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())`,
-		id, h.Hostname, h.OS, h.OSVersion, h.Kernel, h.Arch, nonNil(h.IPAddresses), h.AgentVersion, h.MachineID, serial, expires)
-	return err
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now())`,
+		id, tenant, h.Hostname, h.OS, h.OSVersion, h.Kernel, h.Arch, nonNil(h.IPAddresses), h.AgentVersion, h.MachineID, serial, expires)
+	if err != nil {
+		return err
+	}
+	return p.recordCertificate(ctx, id, tenant, serial, expires)
 }
 
 func (p *Postgres) Heartbeat(ctx context.Context, id string, h HostUpdate, sent, dropped uint64, cpu float64, rss uint64) error {
@@ -353,13 +368,16 @@ func (p *Postgres) RevokeEnrollmentToken(ctx context.Context, id int64) error {
 }
 
 // ConsumeEnrollmentToken atomically uses one enrollment from a valid token.
-func (p *Postgres) ConsumeEnrollmentToken(ctx context.Context, tok string) (bool, error) {
-	tag, err := p.pool.Exec(ctx, `UPDATE enrollment_tokens SET uses = uses + 1
-		WHERE token_hash = $1 AND NOT revoked AND expires_at > now() AND uses < max_uses`, hashToken(tok))
-	if err != nil {
-		return false, err
+// ConsumeEnrollmentToken uses up one enrollment and returns the tenant the
+// new agent joins; ok is false for an invalid, expired or used-up token.
+func (p *Postgres) ConsumeEnrollmentToken(ctx context.Context, tok string) (tenant string, ok bool, err error) {
+	err = p.pool.QueryRow(ctx, `UPDATE enrollment_tokens SET uses = uses + 1
+		WHERE token_hash = $1 AND NOT revoked AND expires_at > now() AND uses < max_uses
+		RETURNING tenant_id`, hashToken(tok)).Scan(&tenant)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
 	}
-	return tag.RowsAffected() == 1, nil
+	return tenant, err == nil, err
 }
 
 func nonNil(s []string) []string {

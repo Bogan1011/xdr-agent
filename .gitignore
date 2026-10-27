@@ -2,3 +2,4 @@
 deploy/.env
 web/node_modules/
 web/dist/
+/agent-rs/target/

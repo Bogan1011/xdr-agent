@@ -34,6 +34,10 @@ type Agent struct {
 
 	sent    atomic.Uint64
 	dropped atomic.Uint64
+	agentID atomic.Value // string, set once enrolled
+
+	hasher *procfs.Hasher
+	procs  *procContexts
 
 	client  xdrv1.AgentServiceClient
 	scanner *Scanner
@@ -57,6 +61,9 @@ func New(cfg *Config, log *slog.Logger) *Agent {
 		start: time.Now(),
 		wake:  make(chan struct{}, 1),
 	}
+	a.agentID.Store("")
+	a.hasher = procfs.NewHasher(50000)
+	a.procs = newProcContexts(a.hasher)
 	a.tamper = newTamper(cfg, log.With("component", "tamper"), a.tamperEvent)
 	a.pam = newPAM(cfg, log.With("component", "pam"))
 	a.prev = newPrevention(a, log.With("component", "prevention"))
@@ -102,6 +109,7 @@ func (a *Agent) emit(e *xdrv1.Event) {
 }
 
 func (a *Agent) send(e *xdrv1.Event) {
+	a.envelope(e)
 	select {
 	case a.queue <- e:
 	default:
@@ -134,6 +142,7 @@ func (a *Agent) Run() error {
 		}
 	}
 	a.log.Info("agent identity loaded", "agent_id", id.AgentID)
+	a.agentID.Store(id.AgentID)
 
 	creds := credentials.NewTLS(&tls.Config{
 		Certificates: []tls.Certificate{id.Cert},
@@ -158,7 +167,7 @@ func (a *Agent) Run() error {
 		append([]string{a.cfg.StateDir}, a.cfg.FileExclude...))
 	a.scanner.OnMatch = a.autoQuarantine
 
-	hasher := procfs.NewHasher(50000)
+	hasher := a.hasher
 	collectors := []collector.Collector{
 		&collector.Process{Hasher: hasher, Log: a.log.With("collector", "process")},
 	}

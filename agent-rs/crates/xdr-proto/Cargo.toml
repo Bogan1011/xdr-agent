@@ -1,0 +1,17 @@
+[package]
+name = "xdr-proto"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+prost.workspace = true
+tonic.workspace = true
+tonic-prost.workspace = true
+
+[build-dependencies]
+tonic-prost-build = { version = "0.14", optional = true }
+
+[features]
+# Regenerates src/gen from ../../proto. Needs protoc on PATH.
+regen = ["dep:tonic-prost-build"]

@@ -46,7 +46,7 @@ func (s *Enrollment) Enroll(ctx context.Context, req *xdrv1.EnrollRequest) (*xdr
 	if req.Host == nil || req.Host.Hostname == "" {
 		return nil, status.Error(codes.InvalidArgument, "host info is required")
 	}
-	ok, err := s.DB.ConsumeEnrollmentToken(ctx, req.EnrollmentToken)
+	tenant, ok, err := s.DB.ConsumeEnrollmentToken(ctx, req.EnrollmentToken)
 	if err != nil {
 		s.Log.Error("consume enrollment token", "err", err)
 		return nil, status.Error(codes.Internal, "enrollment failed")
@@ -61,7 +61,7 @@ func (s *Enrollment) Enroll(ctx context.Context, req *xdrv1.EnrollRequest) (*xdr
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "bad csr: %v", err)
 	}
-	if err := s.DB.CreateAgent(ctx, id, hostUpdate(req.Host), cert.SerialNumber.Text(16), cert.NotAfter); err != nil {
+	if err := s.DB.CreateAgent(ctx, id, tenant, hostUpdate(req.Host), cert.SerialNumber.Text(16), cert.NotAfter); err != nil {
 		s.Log.Error("create agent", "err", err)
 		return nil, status.Error(codes.Internal, "enrollment failed")
 	}
@@ -95,7 +95,7 @@ var commandTypes = map[string]xdrv1.CommandType{
 
 type ctxKey struct{}
 
-type agentCtx struct{ id, hostname string }
+type agentCtx struct{ id, hostname, tenant string }
 
 // AuthInterceptor maps the verified client certificate to an enrolled,
 // non-revoked agent and stores it in the context.
@@ -132,15 +132,16 @@ func (s *Agents) authenticate(ctx context.Context) (context.Context, error) {
 	if !ok || len(ti.State.VerifiedChains) == 0 || len(ti.State.VerifiedChains[0]) == 0 {
 		return nil, status.Error(codes.Unauthenticated, "client certificate required")
 	}
-	id := ti.State.VerifiedChains[0][0].Subject.CommonName
-	host, revoked, err := s.DB.AgentHostname(ctx, id)
-	if errors.Is(err, store.ErrNotFound) || revoked {
+	leaf := ti.State.VerifiedChains[0][0]
+	id := leaf.Subject.CommonName
+	ai, err := s.DB.AgentIdentity(ctx, id, leaf.SerialNumber.Text(16))
+	if errors.Is(err, store.ErrNotFound) || (err == nil && ai.Revoked) {
 		return nil, status.Error(codes.PermissionDenied, "agent is not enrolled or has been revoked")
 	}
 	if err != nil {
 		return nil, status.Error(codes.Unavailable, "lookup failed")
 	}
-	return context.WithValue(ctx, ctxKey{}, agentCtx{id: id, hostname: host}), nil
+	return context.WithValue(ctx, ctxKey{}, agentCtx{id: id, hostname: ai.Hostname, tenant: ai.TenantID}), nil
 }
 
 func fromCtx(ctx context.Context) agentCtx { return ctx.Value(ctxKey{}).(agentCtx) }
@@ -220,6 +221,7 @@ func ResolvePrevention(ctx context.Context, db *store.Postgres, id string) (*xdr
 		return nil, nil, nil, err
 	}
 	p.Name = pol.Name
+	p.Version = pol.Version
 	return p, pol, state, nil
 }
 
@@ -320,12 +322,19 @@ func EventTypeName(t xdrv1.EventType) string {
 }
 
 func toRow(a agentCtx, e *xdrv1.Event) store.Event {
+	// Identity comes from the authenticated certificate and the enrollment
+	// record, never from what the agent claims in the envelope.
 	r := store.Event{
-		Time:     time.Unix(0, e.TimestampUnixNano).UTC(),
-		AgentID:  a.id,
-		Hostname: a.hostname,
-		EventID:  e.Id,
-		Type:     EventTypeName(e.Type),
+		Time:          time.Unix(0, e.TimestampUnixNano).UTC(),
+		TenantID:      a.tenant,
+		AgentID:       a.id,
+		EndpointID:    a.id,
+		Hostname:      a.hostname,
+		EventID:       e.Id,
+		SchemaVersion: uint16(e.SchemaVersion),
+		Type:          EventTypeName(e.Type),
+		Priority:      PriorityName(e.Priority),
+		Metadata:      e.Metadata,
 	}
 	// Agent clocks can be wrong; keep events inside a sane window so they
 	// land in a valid partition.
@@ -370,7 +379,47 @@ func toRow(a agentCtx, e *xdrv1.Event) store.Event {
 		// Like tamper events, the action is kept in path.
 		r.Path, r.Args, r.RemoteAddr, r.PID, r.Exe, r.SHA256, r.User = pe.Action, pe.Detail, pe.RemoteAddr, pe.Pid, pe.Exe, pe.Sha256, pe.User
 	}
+	applyProcessContext(&r, e.ProcessContext)
 	return r
+}
+
+// applyProcessContext adds the actor's identity and parent. Payload fields
+// win; the context fills what a collector did not know, e.g. the user behind
+// a network connection.
+func applyProcessContext(r *store.Event, pc *xdrv1.ProcessContext) {
+	if pc == nil {
+		return
+	}
+	r.ProcessGUID, r.ParentGUID = pc.ProcessGuid, pc.ParentProcessGuid
+	r.ParentArgs, r.ParentUser, r.ParentSHA256 = pc.ParentCommandLine, pc.ParentUser, pc.ParentSha256
+	if pc.StartTimeUnixNano > 0 {
+		r.ProcessStart = time.Unix(0, pc.StartTimeUnixNano).UTC()
+	}
+	if r.PID == 0 {
+		r.PID = pc.Pid
+	}
+	if r.PPID == 0 {
+		r.PPID = pc.Ppid
+	}
+	if r.User == "" {
+		r.User = pc.User
+	}
+	if r.ParentExe == "" {
+		r.ParentExe = pc.ParentExecutable
+	}
+	// For file, network and policy events exe is the actor; keep the
+	// payload's value when it names something else (a blocked or scanned file).
+	if r.Exe == "" && r.Type != "exec_blocked" {
+		r.Exe = pc.Executable
+	}
+}
+
+// PriorityName is the stored form of a priority, e.g. "critical".
+func PriorityName(p xdrv1.Priority) string {
+	if p == xdrv1.Priority_PRIORITY_UNSPECIFIED {
+		return ""
+	}
+	return strings.ToLower(strings.TrimPrefix(p.String(), "PRIORITY_"))
 }
 
 // joinArgs renders argv as a shell-like string; arguments with spaces are quoted.
