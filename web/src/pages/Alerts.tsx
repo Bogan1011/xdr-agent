@@ -173,6 +173,9 @@ function AlertDetail({ id, onClose, onChange }: { id: number; onClose: () => voi
         >
           Isolate host
         </button>
+        {(a.process_guid || e.process_guid) && (
+          <Link to={`/storyline/${a.agent_id}/${a.process_guid || e.process_guid}?alert=${a.id}`}>Investigate in Workbench →</Link>
+        )}
         <Link to={`/endpoints/${a.agent_id}`}>Open endpoint →</Link>
         <span style={{ flex: 1 }} />
         <span className="muted">Status:</span>

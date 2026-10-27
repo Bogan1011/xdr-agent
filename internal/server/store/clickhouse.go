@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS events (
 	parent_user         LowCardinality(String) DEFAULT '',
 	parent_sha256       String DEFAULT '',
 	process_start       DateTime64(9, 'UTC') DEFAULT 0,
+	storyline_guid      String DEFAULT '',
 	path        String,
 	old_path    String,
 	size        UInt64,
@@ -106,12 +107,22 @@ CREATE TABLE IF NOT EXISTS events (
 	INDEX idx_sha256 sha256 TYPE bloom_filter GRANULARITY 4,
 	INDEX idx_remote remote_addr TYPE bloom_filter GRANULARITY 4,
 	INDEX idx_guid process_guid TYPE bloom_filter GRANULARITY 4,
-	INDEX idx_parent_guid parent_process_guid TYPE bloom_filter GRANULARITY 4
+	INDEX idx_parent_guid parent_process_guid TYPE bloom_filter GRANULARITY 4,
+	INDEX idx_storyline storyline_guid TYPE bloom_filter GRANULARITY 4
 ) ENGINE = ReplacingMergeTree
 PARTITION BY toYYYYMMDD(ts)
 ORDER BY (tenant_id, agent_id, type, ts, event_id)
 TTL toDateTime(ts) + INTERVAL %d DAY`, ttlDays)); err != nil {
 		return err
+	}
+	// Added in 0.9: the storyline (process tree) an event belongs to.
+	for _, q := range []string{
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS storyline_guid String DEFAULT '' AFTER process_start`,
+		`ALTER TABLE events ADD INDEX IF NOT EXISTS idx_storyline storyline_guid TYPE bloom_filter GRANULARITY 4`,
+	} {
+		if err := c.conn.Exec(ctx, q); err != nil {
+			return err
+		}
 	}
 	if legacy > 0 && upgraded == 0 {
 		if err := c.conn.Exec(ctx, `INSERT INTO events (`+eventsV0Columns+`) SELECT `+eventsV0Columns+` FROM events_v0`); err != nil {
@@ -148,6 +159,7 @@ type Event struct {
 	ParentUser    string            `json:"parent_user" ch:"parent_user"`
 	ParentSHA256  string            `json:"parent_sha256" ch:"parent_sha256"`
 	ProcessStart  time.Time         `json:"process_start" ch:"process_start"`
+	StorylineGUID string            `json:"storyline_guid" ch:"storyline_guid"`
 	Path          string            `json:"path" ch:"path"`
 	OldPath       string            `json:"old_path" ch:"old_path"`
 	Size          uint64            `json:"size" ch:"size"`
@@ -233,6 +245,39 @@ func (c *ClickHouse) Query(ctx context.Context, q EventQuery) ([]Event, error) {
 	if out == nil {
 		out = []Event{}
 	}
+	return out, err
+}
+
+// maxTreeQuery bounds each process tree query.
+const maxTreeQuery = 2000
+
+// Processes returns the process_exec events of the given processes.
+func (c *ClickHouse) Processes(ctx context.Context, agentID string, guids []string) ([]Event, error) {
+	return c.treeQuery(ctx, "type = 'process_exec' AND process_guid IN ?", agentID, guids, maxTreeQuery)
+}
+
+// Children returns the process_exec events of the children of the given
+// processes.
+func (c *ClickHouse) Children(ctx context.Context, agentID string, parents []string, limit int) ([]Event, error) {
+	return c.treeQuery(ctx, "type = 'process_exec' AND parent_process_guid IN ?", agentID, parents, limit)
+}
+
+// Activity returns what the given processes did besides starting: file,
+// network, policy and exit events, newest first.
+func (c *ClickHouse) Activity(ctx context.Context, agentID string, guids []string, limit int) ([]Event, error) {
+	return c.treeQuery(ctx, "type != 'process_exec' AND process_guid IN ?", agentID, guids, limit)
+}
+
+func (c *ClickHouse) treeQuery(ctx context.Context, cond, agentID string, guids []string, limit int) ([]Event, error) {
+	out := []Event{}
+	if len(guids) == 0 {
+		return out, nil
+	}
+	if limit <= 0 || limit > maxTreeQuery {
+		limit = maxTreeQuery
+	}
+	err := c.conn.Select(ctx, &out, "SELECT * FROM events WHERE agent_id = ? AND "+cond+
+		fmt.Sprintf(" ORDER BY ts DESC LIMIT %d", limit), agentID, guids)
 	return out, err
 }
 

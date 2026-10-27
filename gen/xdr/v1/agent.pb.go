@@ -3866,6 +3866,7 @@ type LiveDown struct {
 	//	*LiveDown_ShellResize
 	//	*LiveDown_ShellClose
 	//	*LiveDown_Activity
+	//	*LiveDown_Command
 	Msg           isLiveDown_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3953,6 +3954,15 @@ func (x *LiveDown) GetActivity() *ActivityRequest {
 	return nil
 }
 
+func (x *LiveDown) GetCommand() *AgentCommand {
+	if x != nil {
+		if x, ok := x.Msg.(*LiveDown_Command); ok {
+			return x.Command
+		}
+	}
+	return nil
+}
+
 type isLiveDown_Msg interface {
 	isLiveDown_Msg()
 }
@@ -3977,6 +3987,13 @@ type LiveDown_Activity struct {
 	Activity *ActivityRequest `protobuf:"bytes,5,opt,name=activity,proto3,oneof"`
 }
 
+type LiveDown_Command struct {
+	// A response command, pushed the moment it is queued. Only sent to agents
+	// whose LiveHello says they take commands here; the others get it with
+	// their next heartbeat.
+	Command *AgentCommand `protobuf:"bytes,6,opt,name=command,proto3,oneof"`
+}
+
 func (*LiveDown_ShellOpen) isLiveDown_Msg() {}
 
 func (*LiveDown_ShellInput) isLiveDown_Msg() {}
@@ -3987,6 +4004,8 @@ func (*LiveDown_ShellClose) isLiveDown_Msg() {}
 
 func (*LiveDown_Activity) isLiveDown_Msg() {}
 
+func (*LiveDown_Command) isLiveDown_Msg() {}
+
 // Agent to console, on the live stream.
 type LiveUp struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -3995,6 +4014,7 @@ type LiveUp struct {
 	//	*LiveUp_ShellOutput
 	//	*LiveUp_ShellExit
 	//	*LiveUp_Activity
+	//	*LiveUp_Hello
 	Msg           isLiveUp_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4064,6 +4084,15 @@ func (x *LiveUp) GetActivity() *Activity {
 	return nil
 }
 
+func (x *LiveUp) GetHello() *LiveHello {
+	if x != nil {
+		if x, ok := x.Msg.(*LiveUp_Hello); ok {
+			return x.Hello
+		}
+	}
+	return nil
+}
+
 type isLiveUp_Msg interface {
 	isLiveUp_Msg()
 }
@@ -4080,11 +4109,64 @@ type LiveUp_Activity struct {
 	Activity *Activity `protobuf:"bytes,3,opt,name=activity,proto3,oneof"`
 }
 
+type LiveUp_Hello struct {
+	Hello *LiveHello `protobuf:"bytes,4,opt,name=hello,proto3,oneof"`
+}
+
 func (*LiveUp_ShellOutput) isLiveUp_Msg() {}
 
 func (*LiveUp_ShellExit) isLiveUp_Msg() {}
 
 func (*LiveUp_Activity) isLiveUp_Msg() {}
+
+func (*LiveUp_Hello) isLiveUp_Msg() {}
+
+// The first message an agent sends on a new live stream.
+type LiveHello struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The agent runs AgentCommands pushed on this stream and reports them with
+	// ReportCommandResult, as it does for heartbeat commands.
+	Commands      bool `protobuf:"varint,1,opt,name=commands,proto3" json:"commands,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LiveHello) Reset() {
+	*x = LiveHello{}
+	mi := &file_xdr_v1_agent_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LiveHello) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LiveHello) ProtoMessage() {}
+
+func (x *LiveHello) ProtoReflect() protoreflect.Message {
+	mi := &file_xdr_v1_agent_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LiveHello.ProtoReflect.Descriptor instead.
+func (*LiveHello) Descriptor() ([]byte, []int) {
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *LiveHello) GetCommands() bool {
+	if x != nil {
+		return x.Commands
+	}
+	return false
+}
 
 // Start a login shell for user on a new pseudo-terminal.
 type ShellOpen struct {
@@ -4099,7 +4181,7 @@ type ShellOpen struct {
 
 func (x *ShellOpen) Reset() {
 	*x = ShellOpen{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[46]
+	mi := &file_xdr_v1_agent_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4111,7 +4193,7 @@ func (x *ShellOpen) String() string {
 func (*ShellOpen) ProtoMessage() {}
 
 func (x *ShellOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[46]
+	mi := &file_xdr_v1_agent_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4124,7 +4206,7 @@ func (x *ShellOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellOpen.ProtoReflect.Descriptor instead.
 func (*ShellOpen) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{46}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *ShellOpen) GetSessionId() string {
@@ -4165,7 +4247,7 @@ type ShellData struct {
 
 func (x *ShellData) Reset() {
 	*x = ShellData{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[47]
+	mi := &file_xdr_v1_agent_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4177,7 +4259,7 @@ func (x *ShellData) String() string {
 func (*ShellData) ProtoMessage() {}
 
 func (x *ShellData) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[47]
+	mi := &file_xdr_v1_agent_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4190,7 +4272,7 @@ func (x *ShellData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellData.ProtoReflect.Descriptor instead.
 func (*ShellData) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{47}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *ShellData) GetSessionId() string {
@@ -4218,7 +4300,7 @@ type ShellResize struct {
 
 func (x *ShellResize) Reset() {
 	*x = ShellResize{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[48]
+	mi := &file_xdr_v1_agent_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4230,7 +4312,7 @@ func (x *ShellResize) String() string {
 func (*ShellResize) ProtoMessage() {}
 
 func (x *ShellResize) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[48]
+	mi := &file_xdr_v1_agent_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4243,7 +4325,7 @@ func (x *ShellResize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellResize.ProtoReflect.Descriptor instead.
 func (*ShellResize) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{48}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ShellResize) GetSessionId() string {
@@ -4276,7 +4358,7 @@ type ShellClose struct {
 
 func (x *ShellClose) Reset() {
 	*x = ShellClose{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[49]
+	mi := &file_xdr_v1_agent_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4288,7 +4370,7 @@ func (x *ShellClose) String() string {
 func (*ShellClose) ProtoMessage() {}
 
 func (x *ShellClose) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[49]
+	mi := &file_xdr_v1_agent_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4301,7 +4383,7 @@ func (x *ShellClose) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellClose.ProtoReflect.Descriptor instead.
 func (*ShellClose) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{49}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ShellClose) GetSessionId() string {
@@ -4323,7 +4405,7 @@ type ShellExit struct {
 
 func (x *ShellExit) Reset() {
 	*x = ShellExit{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[50]
+	mi := &file_xdr_v1_agent_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4335,7 +4417,7 @@ func (x *ShellExit) String() string {
 func (*ShellExit) ProtoMessage() {}
 
 func (x *ShellExit) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[50]
+	mi := &file_xdr_v1_agent_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4348,7 +4430,7 @@ func (x *ShellExit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellExit.ProtoReflect.Descriptor instead.
 func (*ShellExit) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{50}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ShellExit) GetSessionId() string {
@@ -4381,7 +4463,7 @@ type ActivityRequest struct {
 
 func (x *ActivityRequest) Reset() {
 	*x = ActivityRequest{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[51]
+	mi := &file_xdr_v1_agent_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4393,7 +4475,7 @@ func (x *ActivityRequest) String() string {
 func (*ActivityRequest) ProtoMessage() {}
 
 func (x *ActivityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[51]
+	mi := &file_xdr_v1_agent_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4406,7 +4488,7 @@ func (x *ActivityRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActivityRequest.ProtoReflect.Descriptor instead.
 func (*ActivityRequest) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{51}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *ActivityRequest) GetRequestId() string {
@@ -4433,7 +4515,7 @@ type Activity struct {
 
 func (x *Activity) Reset() {
 	*x = Activity{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[52]
+	mi := &file_xdr_v1_agent_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4445,7 +4527,7 @@ func (x *Activity) String() string {
 func (*Activity) ProtoMessage() {}
 
 func (x *Activity) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[52]
+	mi := &file_xdr_v1_agent_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4458,7 +4540,7 @@ func (x *Activity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Activity.ProtoReflect.Descriptor instead.
 func (*Activity) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{52}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *Activity) GetRequestId() string {
@@ -4532,7 +4614,7 @@ type TerminalSession struct {
 
 func (x *TerminalSession) Reset() {
 	*x = TerminalSession{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[53]
+	mi := &file_xdr_v1_agent_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4544,7 +4626,7 @@ func (x *TerminalSession) String() string {
 func (*TerminalSession) ProtoMessage() {}
 
 func (x *TerminalSession) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[53]
+	mi := &file_xdr_v1_agent_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4557,7 +4639,7 @@ func (x *TerminalSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TerminalSession.ProtoReflect.Descriptor instead.
 func (*TerminalSession) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{53}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *TerminalSession) GetTty() string {
@@ -4632,7 +4714,7 @@ type LiveProcess struct {
 
 func (x *LiveProcess) Reset() {
 	*x = LiveProcess{}
-	mi := &file_xdr_v1_agent_proto_msgTypes[54]
+	mi := &file_xdr_v1_agent_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4644,7 +4726,7 @@ func (x *LiveProcess) String() string {
 func (*LiveProcess) ProtoMessage() {}
 
 func (x *LiveProcess) ProtoReflect() protoreflect.Message {
-	mi := &file_xdr_v1_agent_proto_msgTypes[54]
+	mi := &file_xdr_v1_agent_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4657,7 +4739,7 @@ func (x *LiveProcess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LiveProcess.ProtoReflect.Descriptor instead.
 func (*LiveProcess) Descriptor() ([]byte, []int) {
-	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{54}
+	return file_xdr_v1_agent_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *LiveProcess) GetPid() uint32 {
@@ -5048,7 +5130,7 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	" \x01(\bR\ttruncated\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\v \x01(\tR\trequestId\"\x15\n" +
-	"\x13SessionRecordingAck\"\xa3\x02\n" +
+	"\x13SessionRecordingAck\"\xd5\x02\n" +
 	"\bLiveDown\x122\n" +
 	"\n" +
 	"shell_open\x18\x01 \x01(\v2\x11.xdr.v1.ShellOpenH\x00R\tshellOpen\x124\n" +
@@ -5057,14 +5139,18 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"\fshell_resize\x18\x03 \x01(\v2\x13.xdr.v1.ShellResizeH\x00R\vshellResize\x125\n" +
 	"\vshell_close\x18\x04 \x01(\v2\x12.xdr.v1.ShellCloseH\x00R\n" +
 	"shellClose\x125\n" +
-	"\bactivity\x18\x05 \x01(\v2\x17.xdr.v1.ActivityRequestH\x00R\bactivityB\x05\n" +
-	"\x03msg\"\xab\x01\n" +
+	"\bactivity\x18\x05 \x01(\v2\x17.xdr.v1.ActivityRequestH\x00R\bactivity\x120\n" +
+	"\acommand\x18\x06 \x01(\v2\x14.xdr.v1.AgentCommandH\x00R\acommandB\x05\n" +
+	"\x03msg\"\xd6\x01\n" +
 	"\x06LiveUp\x126\n" +
 	"\fshell_output\x18\x01 \x01(\v2\x11.xdr.v1.ShellDataH\x00R\vshellOutput\x122\n" +
 	"\n" +
 	"shell_exit\x18\x02 \x01(\v2\x11.xdr.v1.ShellExitH\x00R\tshellExit\x12.\n" +
-	"\bactivity\x18\x03 \x01(\v2\x10.xdr.v1.ActivityH\x00R\bactivityB\x05\n" +
-	"\x03msg\"f\n" +
+	"\bactivity\x18\x03 \x01(\v2\x10.xdr.v1.ActivityH\x00R\bactivity\x12)\n" +
+	"\x05hello\x18\x04 \x01(\v2\x11.xdr.v1.LiveHelloH\x00R\x05helloB\x05\n" +
+	"\x03msg\"'\n" +
+	"\tLiveHello\x12\x1a\n" +
+	"\bcommands\x18\x01 \x01(\bR\bcommands\"f\n" +
 	"\tShellOpen\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
@@ -5191,7 +5277,7 @@ func file_xdr_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_xdr_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_xdr_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 57)
+var file_xdr_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 58)
 var file_xdr_v1_agent_proto_goTypes = []any{
 	(CommandType)(0),                  // 0: xdr.v1.CommandType
 	(EventType)(0),                    // 1: xdr.v1.EventType
@@ -5242,17 +5328,18 @@ var file_xdr_v1_agent_proto_goTypes = []any{
 	(*SessionRecordingAck)(nil),       // 46: xdr.v1.SessionRecordingAck
 	(*LiveDown)(nil),                  // 47: xdr.v1.LiveDown
 	(*LiveUp)(nil),                    // 48: xdr.v1.LiveUp
-	(*ShellOpen)(nil),                 // 49: xdr.v1.ShellOpen
-	(*ShellData)(nil),                 // 50: xdr.v1.ShellData
-	(*ShellResize)(nil),               // 51: xdr.v1.ShellResize
-	(*ShellClose)(nil),                // 52: xdr.v1.ShellClose
-	(*ShellExit)(nil),                 // 53: xdr.v1.ShellExit
-	(*ActivityRequest)(nil),           // 54: xdr.v1.ActivityRequest
-	(*Activity)(nil),                  // 55: xdr.v1.Activity
-	(*TerminalSession)(nil),           // 56: xdr.v1.TerminalSession
-	(*LiveProcess)(nil),               // 57: xdr.v1.LiveProcess
-	nil,                               // 58: xdr.v1.AgentCommand.ArgsEntry
-	nil,                               // 59: xdr.v1.Event.MetadataEntry
+	(*LiveHello)(nil),                 // 49: xdr.v1.LiveHello
+	(*ShellOpen)(nil),                 // 50: xdr.v1.ShellOpen
+	(*ShellData)(nil),                 // 51: xdr.v1.ShellData
+	(*ShellResize)(nil),               // 52: xdr.v1.ShellResize
+	(*ShellClose)(nil),                // 53: xdr.v1.ShellClose
+	(*ShellExit)(nil),                 // 54: xdr.v1.ShellExit
+	(*ActivityRequest)(nil),           // 55: xdr.v1.ActivityRequest
+	(*Activity)(nil),                  // 56: xdr.v1.Activity
+	(*TerminalSession)(nil),           // 57: xdr.v1.TerminalSession
+	(*LiveProcess)(nil),               // 58: xdr.v1.LiveProcess
+	nil,                               // 59: xdr.v1.AgentCommand.ArgsEntry
+	nil,                               // 60: xdr.v1.Event.MetadataEntry
 }
 var file_xdr_v1_agent_proto_depIdxs = []int32{
 	3,  // 0: xdr.v1.EnrollRequest.host:type_name -> xdr.v1.HostInfo
@@ -5273,12 +5360,12 @@ var file_xdr_v1_agent_proto_depIdxs = []int32{
 	15, // 15: xdr.v1.PreventionPolicy.application_control:type_name -> xdr.v1.ApplicationControlPolicy
 	18, // 16: xdr.v1.FirewallPolicy.rules:type_name -> xdr.v1.FirewallRule
 	0,  // 17: xdr.v1.AgentCommand.type:type_name -> xdr.v1.CommandType
-	58, // 18: xdr.v1.AgentCommand.args:type_name -> xdr.v1.AgentCommand.ArgsEntry
+	59, // 18: xdr.v1.AgentCommand.args:type_name -> xdr.v1.AgentCommand.ArgsEntry
 	31, // 19: xdr.v1.EventBatch.events:type_name -> xdr.v1.Event
 	1,  // 20: xdr.v1.Event.type:type_name -> xdr.v1.EventType
 	2,  // 21: xdr.v1.Event.priority:type_name -> xdr.v1.Priority
 	32, // 22: xdr.v1.Event.process_context:type_name -> xdr.v1.ProcessContext
-	59, // 23: xdr.v1.Event.metadata:type_name -> xdr.v1.Event.MetadataEntry
+	60, // 23: xdr.v1.Event.metadata:type_name -> xdr.v1.Event.MetadataEntry
 	33, // 24: xdr.v1.Event.process:type_name -> xdr.v1.ProcessEvent
 	34, // 25: xdr.v1.Event.file:type_name -> xdr.v1.FileEvent
 	35, // 26: xdr.v1.Event.network:type_name -> xdr.v1.NetworkEvent
@@ -5286,44 +5373,46 @@ var file_xdr_v1_agent_proto_depIdxs = []int32{
 	37, // 28: xdr.v1.Event.tamper:type_name -> xdr.v1.TamperEvent
 	38, // 29: xdr.v1.Event.policy:type_name -> xdr.v1.PolicyEvent
 	42, // 30: xdr.v1.PrivilegedAccounts.accounts:type_name -> xdr.v1.PrivilegedAccount
-	49, // 31: xdr.v1.LiveDown.shell_open:type_name -> xdr.v1.ShellOpen
-	50, // 32: xdr.v1.LiveDown.shell_input:type_name -> xdr.v1.ShellData
-	51, // 33: xdr.v1.LiveDown.shell_resize:type_name -> xdr.v1.ShellResize
-	52, // 34: xdr.v1.LiveDown.shell_close:type_name -> xdr.v1.ShellClose
-	54, // 35: xdr.v1.LiveDown.activity:type_name -> xdr.v1.ActivityRequest
-	50, // 36: xdr.v1.LiveUp.shell_output:type_name -> xdr.v1.ShellData
-	53, // 37: xdr.v1.LiveUp.shell_exit:type_name -> xdr.v1.ShellExit
-	55, // 38: xdr.v1.LiveUp.activity:type_name -> xdr.v1.Activity
-	56, // 39: xdr.v1.Activity.terminals:type_name -> xdr.v1.TerminalSession
-	57, // 40: xdr.v1.Activity.top:type_name -> xdr.v1.LiveProcess
-	57, // 41: xdr.v1.TerminalSession.processes:type_name -> xdr.v1.LiveProcess
-	4,  // 42: xdr.v1.EnrollmentService.Enroll:input_type -> xdr.v1.EnrollRequest
-	6,  // 43: xdr.v1.AgentService.Heartbeat:input_type -> xdr.v1.HeartbeatRequest
-	29, // 44: xdr.v1.AgentService.SendEvents:input_type -> xdr.v1.EventBatch
-	25, // 45: xdr.v1.AgentService.GetDetectionContent:input_type -> xdr.v1.DetectionContentRequest
-	23, // 46: xdr.v1.AgentService.ReportCommandResult:input_type -> xdr.v1.CommandResult
-	27, // 47: xdr.v1.AgentService.GetAgentBinary:input_type -> xdr.v1.AgentBinaryRequest
-	39, // 48: xdr.v1.AgentService.RequestElevation:input_type -> xdr.v1.ElevationRequest
-	40, // 49: xdr.v1.AgentService.GetElevation:input_type -> xdr.v1.GetElevationRequest
-	43, // 50: xdr.v1.AgentService.ReportPrivilegedAccounts:input_type -> xdr.v1.PrivilegedAccounts
-	45, // 51: xdr.v1.AgentService.UploadSessionRecording:input_type -> xdr.v1.SessionRecording
-	48, // 52: xdr.v1.AgentService.Live:input_type -> xdr.v1.LiveUp
-	5,  // 53: xdr.v1.EnrollmentService.Enroll:output_type -> xdr.v1.EnrollResponse
-	8,  // 54: xdr.v1.AgentService.Heartbeat:output_type -> xdr.v1.HeartbeatResponse
-	30, // 55: xdr.v1.AgentService.SendEvents:output_type -> xdr.v1.SendEventsResponse
-	26, // 56: xdr.v1.AgentService.GetDetectionContent:output_type -> xdr.v1.DetectionContent
-	24, // 57: xdr.v1.AgentService.ReportCommandResult:output_type -> xdr.v1.CommandResultAck
-	28, // 58: xdr.v1.AgentService.GetAgentBinary:output_type -> xdr.v1.AgentBinaryChunk
-	41, // 59: xdr.v1.AgentService.RequestElevation:output_type -> xdr.v1.ElevationStatus
-	41, // 60: xdr.v1.AgentService.GetElevation:output_type -> xdr.v1.ElevationStatus
-	44, // 61: xdr.v1.AgentService.ReportPrivilegedAccounts:output_type -> xdr.v1.PrivilegedAccountsAck
-	46, // 62: xdr.v1.AgentService.UploadSessionRecording:output_type -> xdr.v1.SessionRecordingAck
-	47, // 63: xdr.v1.AgentService.Live:output_type -> xdr.v1.LiveDown
-	53, // [53:64] is the sub-list for method output_type
-	42, // [42:53] is the sub-list for method input_type
-	42, // [42:42] is the sub-list for extension type_name
-	42, // [42:42] is the sub-list for extension extendee
-	0,  // [0:42] is the sub-list for field type_name
+	50, // 31: xdr.v1.LiveDown.shell_open:type_name -> xdr.v1.ShellOpen
+	51, // 32: xdr.v1.LiveDown.shell_input:type_name -> xdr.v1.ShellData
+	52, // 33: xdr.v1.LiveDown.shell_resize:type_name -> xdr.v1.ShellResize
+	53, // 34: xdr.v1.LiveDown.shell_close:type_name -> xdr.v1.ShellClose
+	55, // 35: xdr.v1.LiveDown.activity:type_name -> xdr.v1.ActivityRequest
+	22, // 36: xdr.v1.LiveDown.command:type_name -> xdr.v1.AgentCommand
+	51, // 37: xdr.v1.LiveUp.shell_output:type_name -> xdr.v1.ShellData
+	54, // 38: xdr.v1.LiveUp.shell_exit:type_name -> xdr.v1.ShellExit
+	56, // 39: xdr.v1.LiveUp.activity:type_name -> xdr.v1.Activity
+	49, // 40: xdr.v1.LiveUp.hello:type_name -> xdr.v1.LiveHello
+	57, // 41: xdr.v1.Activity.terminals:type_name -> xdr.v1.TerminalSession
+	58, // 42: xdr.v1.Activity.top:type_name -> xdr.v1.LiveProcess
+	58, // 43: xdr.v1.TerminalSession.processes:type_name -> xdr.v1.LiveProcess
+	4,  // 44: xdr.v1.EnrollmentService.Enroll:input_type -> xdr.v1.EnrollRequest
+	6,  // 45: xdr.v1.AgentService.Heartbeat:input_type -> xdr.v1.HeartbeatRequest
+	29, // 46: xdr.v1.AgentService.SendEvents:input_type -> xdr.v1.EventBatch
+	25, // 47: xdr.v1.AgentService.GetDetectionContent:input_type -> xdr.v1.DetectionContentRequest
+	23, // 48: xdr.v1.AgentService.ReportCommandResult:input_type -> xdr.v1.CommandResult
+	27, // 49: xdr.v1.AgentService.GetAgentBinary:input_type -> xdr.v1.AgentBinaryRequest
+	39, // 50: xdr.v1.AgentService.RequestElevation:input_type -> xdr.v1.ElevationRequest
+	40, // 51: xdr.v1.AgentService.GetElevation:input_type -> xdr.v1.GetElevationRequest
+	43, // 52: xdr.v1.AgentService.ReportPrivilegedAccounts:input_type -> xdr.v1.PrivilegedAccounts
+	45, // 53: xdr.v1.AgentService.UploadSessionRecording:input_type -> xdr.v1.SessionRecording
+	48, // 54: xdr.v1.AgentService.Live:input_type -> xdr.v1.LiveUp
+	5,  // 55: xdr.v1.EnrollmentService.Enroll:output_type -> xdr.v1.EnrollResponse
+	8,  // 56: xdr.v1.AgentService.Heartbeat:output_type -> xdr.v1.HeartbeatResponse
+	30, // 57: xdr.v1.AgentService.SendEvents:output_type -> xdr.v1.SendEventsResponse
+	26, // 58: xdr.v1.AgentService.GetDetectionContent:output_type -> xdr.v1.DetectionContent
+	24, // 59: xdr.v1.AgentService.ReportCommandResult:output_type -> xdr.v1.CommandResultAck
+	28, // 60: xdr.v1.AgentService.GetAgentBinary:output_type -> xdr.v1.AgentBinaryChunk
+	41, // 61: xdr.v1.AgentService.RequestElevation:output_type -> xdr.v1.ElevationStatus
+	41, // 62: xdr.v1.AgentService.GetElevation:output_type -> xdr.v1.ElevationStatus
+	44, // 63: xdr.v1.AgentService.ReportPrivilegedAccounts:output_type -> xdr.v1.PrivilegedAccountsAck
+	46, // 64: xdr.v1.AgentService.UploadSessionRecording:output_type -> xdr.v1.SessionRecordingAck
+	47, // 65: xdr.v1.AgentService.Live:output_type -> xdr.v1.LiveDown
+	55, // [55:66] is the sub-list for method output_type
+	44, // [44:55] is the sub-list for method input_type
+	44, // [44:44] is the sub-list for extension type_name
+	44, // [44:44] is the sub-list for extension extendee
+	0,  // [0:44] is the sub-list for field type_name
 }
 
 func init() { file_xdr_v1_agent_proto_init() }
@@ -5345,11 +5434,13 @@ func file_xdr_v1_agent_proto_init() {
 		(*LiveDown_ShellResize)(nil),
 		(*LiveDown_ShellClose)(nil),
 		(*LiveDown_Activity)(nil),
+		(*LiveDown_Command)(nil),
 	}
 	file_xdr_v1_agent_proto_msgTypes[45].OneofWrappers = []any{
 		(*LiveUp_ShellOutput)(nil),
 		(*LiveUp_ShellExit)(nil),
 		(*LiveUp_Activity)(nil),
+		(*LiveUp_Hello)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -5357,7 +5448,7 @@ func file_xdr_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_xdr_v1_agent_proto_rawDesc), len(file_xdr_v1_agent_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   57,
+			NumMessages:   58,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

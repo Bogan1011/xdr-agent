@@ -28,6 +28,7 @@ import (
 	"github.com/Bogan1011/xdr-agent/internal/server/detect"
 	"github.com/Bogan1011/xdr-agent/internal/server/grpcsvc"
 	"github.com/Bogan1011/xdr-agent/internal/server/live"
+	"github.com/Bogan1011/xdr-agent/internal/server/pipeline"
 	"github.com/Bogan1011/xdr-agent/internal/server/pki"
 	"github.com/Bogan1011/xdr-agent/internal/server/store"
 )
@@ -111,7 +112,25 @@ func run(log *slog.Logger) error {
 		log.Warn("mark stale deploy jobs", "err", err)
 	}
 
-	det := &detect.Service{DB: db, Log: log}
+	// Commands queued anywhere (console, rules, a separate detection service)
+	// are pushed to agents with an open live stream at once.
+	hub := &live.Hub{DB: db, Log: log.With("component", "live"), Commands: db}
+	go hub.RunDispatcher(ctx)
+
+	det := &detect.Service{DB: db, Log: log, OnCommand: hub.Notify}
+	// Detection runs here unless XDR_DETECT_URL points at an xdr-detect.
+	var detector pipeline.Detector = det
+	if url := env("XDR_DETECT_URL", ""); url != "" {
+		token := env("XDR_DETECT_TOKEN", "")
+		if len(token) < 16 {
+			return errors.New("XDR_DETECT_TOKEN must be set and at least 16 characters when XDR_DETECT_URL is set")
+		}
+		remote := pipeline.NewRemote(url, token, log.With("component", "detect-client"))
+		go remote.Run(ctx)
+		det.OnReload = func() { go remote.Reload(context.WithoutCancel(ctx)) }
+		detector = remote
+		log.Info("detection runs in a separate service", "url", url)
+	}
 	if err := det.Init(ctx); err != nil {
 		return fmt.Errorf("detection: %w", err)
 	}
@@ -130,8 +149,8 @@ func run(log *slog.Logger) error {
 		MinVersion:   tls.VersionTLS13,
 	}
 	downloads := env("XDR_DOWNLOADS_DIR", "")
-	hub := &live.Hub{DB: db, Log: log.With("component", "live")}
-	agents := &grpcsvc.Agents{DB: db, Events: events, Detect: det, Log: log, DownloadsDir: downloads, Hub: hub}
+	agents := &grpcsvc.Agents{DB: db, Events: events, Detect: det, Log: log, DownloadsDir: downloads, Hub: hub,
+		Pipeline: &pipeline.Pipeline{Store: events, Enricher: &pipeline.Enricher{}, Detector: detector}}
 	agentSrv := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(agentTLS)),
 		grpc.UnaryInterceptor(agents.AuthInterceptor),

@@ -75,6 +75,14 @@ function Detail({ e }: { e: XdrEvent }) {
           <dd className="mono">{v}</dd>
         </Fragment>
       ))}
+      {e.process_guid && (
+        <>
+          <dt>Process tree</dt>
+          <dd>
+            <Link to={`/storyline/${e.agent_id}/${e.process_guid}`}>Open storyline →</Link>
+          </dd>
+        </>
+      )}
     </dl>
   );
 }

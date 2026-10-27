@@ -87,6 +87,7 @@ func (a *API) Handler() http.Handler {
 	a.pamRoutes(mux)
 	a.preventionRoutes(mux)
 	a.liveRoutes(mux)
+	a.storylineRoutes(mux)
 
 	// Public: the installer fetches these before the host has any identity.
 	mux.HandleFunc("GET /pki/ca.crt", a.caCert)

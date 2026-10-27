@@ -279,5 +279,11 @@ with `cd web && npm run dev` (it proxies `/api` to `:8080`).
    tenant_id and policy versions in the data model. See
    [docs/architecture.md](docs/architecture.md) for the target architecture
    and the Rust agent plan.
-9. Rust agent, detection service split, process tree and real-time command
-   stream, then the remaining Linux gaps and the Windows agent.
+9. **Detection architecture** (0.9.0): the detection pipeline (normalize,
+   enrich, detect, correlate) with an optional separate `xdr-detect`
+   service, a process tree keyed by `process_guid` with a Storyline view in
+   the console, correlation of several detections in one storyline into a
+   critical alert, and response commands pushed to agents over the live
+   stream instead of waiting for the heartbeat.
+10. Rust agent feature parity, the remaining Linux gaps, then the Windows
+    agent.
