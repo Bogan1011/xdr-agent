@@ -15,8 +15,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use xdr_core::pb::{self, CommandType};
 
-/// Own table, so the Go agent running beside this one keeps its isolation.
-pub const ISOLATION_TABLE: &str = "xdr_rs_isolation";
+pub const ISOLATION_TABLE: &str = "xdr_isolation";
+/// Left behind by the retired Go agent's firewall module.
+pub const FIREWALL_TABLE: &str = "xdr_firewall";
 
 pub struct Responder {
     pub state_dir: PathBuf,
@@ -35,7 +36,7 @@ impl Responder {
             CommandType::IsolateHost => self.isolate(arg("allow")),
             CommandType::UnisolateHost => self.unisolate(),
             other => bail!(
-                "{} is not supported by xdr-agent-rs {} yet",
+                "{} is not supported by xdr-agent {} yet",
                 other.as_str_name(),
                 xdr_core::VERSION
             ),
@@ -50,15 +51,19 @@ impl Responder {
             .context("unsafe state directory")?;
         // Runs outside the agent's own unit, so stopping the unit does not
         // kill it; the pause lets the result reach the console first.
+        // Mirrors the console's uninstall.sh.
         let script = format!(
             "sleep 2\nnft delete table inet {ISOLATION_TABLE} 2>/dev/null || true\n\
-             systemctl disable --now xdr-agent-rs 2>/dev/null || true\n\
-             rm -f /etc/systemd/system/xdr-agent-rs.service /usr/local/bin/xdr-agent-rs\n\
-             systemctl daemon-reload 2>/dev/null || true\nrm -rf '{dir}'\n"
+             nft delete table inet {FIREWALL_TABLE} 2>/dev/null || true\n\
+             systemctl disable --now xdr-agent 2>/dev/null || true\n\
+             rm -rf /etc/systemd/system/xdr-agent.service /etc/systemd/system/xdr-agent.service.d\n\
+             systemctl daemon-reload 2>/dev/null || true\n\
+             rm -f /usr/local/bin/xdr-agent /etc/sudoers.d/xdr-jit-* /etc/sudoers.d/xdr-session-recording\n\
+             rm -rf /etc/xdr-agent '{dir}' /run/xdr-agent\n"
         );
         let mut cmd = if which("systemd-run") {
             let mut c = Command::new("systemd-run");
-            c.args(["--unit=xdr-agent-rs-uninstall", "--collect", "/bin/sh", "-c", &script]);
+            c.args(["--unit=xdr-agent-uninstall", "--collect", "/bin/sh", "-c", &script]);
             c
         } else {
             let mut c = Command::new("setsid");
@@ -67,7 +72,7 @@ impl Responder {
         };
         cmd.stdin(Stdio::null()).spawn().context("start uninstall")?;
         tracing::warn!("uninstall requested by the console");
-        Ok("uninstalling xdr-agent-rs".into())
+        Ok("uninstalling xdr-agent".into())
     }
 
     // --- quarantine ---
@@ -102,7 +107,7 @@ impl Responder {
             mode: st.mode() & 0o7777,
             uid: st.uid(),
             gid: st.gid(),
-            time: unix_now(),
+            time: unix_now().into(),
         };
         let mut f = fs::OpenOptions::new()
             .write(true)
@@ -220,8 +225,8 @@ struct QuarantineRecord {
     mode: u32,
     uid: u32,
     gid: u32,
-    /// Unix seconds.
-    time: i64,
+    /// RFC 3339 from records the Go agent wrote, Unix seconds from this one.
+    time: serde_json::Value,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -505,7 +510,7 @@ mod tests {
         ]);
         assert!(r.contains("elements = { 192.168.1.118/32 }"));
         assert!(r.contains("elements = { fd00::/8 }"));
-        assert!(r.contains("table inet xdr_rs_isolation {"));
+        assert!(r.contains("table inet xdr_isolation {"));
         assert_eq!(r.matches("policy drop;").count(), 2);
     }
 
@@ -539,6 +544,13 @@ mod tests {
         fs::write(&own, b"x").unwrap();
         assert!(r.quarantine(own.to_str().unwrap()).is_err());
         assert!(r.restore("../../etc/passwd").is_err());
+    }
+
+    #[test]
+    fn reads_go_quarantine_records() {
+        let go = r#"{"id":"0123456789abcdef","path":"/tmp/x","sha256":"","size":1,"mode":493,"uid":0,"gid":0,"time":"2026-10-27T10:00:00Z"}"#;
+        let rec: QuarantineRecord = serde_json::from_str(go).unwrap();
+        assert_eq!((rec.mode, rec.path.as_str()), (0o755, "/tmp/x"));
     }
 
     #[test]

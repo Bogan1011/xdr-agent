@@ -5,6 +5,7 @@
 
 pub mod file;
 pub mod host;
+pub mod migrate;
 pub mod network;
 pub mod process;
 pub mod procfs;
@@ -74,6 +75,7 @@ impl Platform for Linux {
     }
 
     fn restore(&self) {
+        migrate::cleanup_go_agent();
         self.responder.restore_isolation();
     }
 }

@@ -1,6 +1,6 @@
 # Builds the dashboard, the server, the optional separate detection service
-# (xdr-detect, same image) and the Linux agent binaries that the server hands
-# out to installers.
+# (xdr-detect, same image) and the Rust Linux agent that the server hands out
+# to installers and agent updates.
 
 FROM node:22-alpine AS web
 WORKDIR /src/web
@@ -8,6 +8,17 @@ COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
 RUN npm run build
+
+# Static (musl) agent, so it runs on any distribution. amd64 only for now:
+# arm64 needs a cross C toolchain for ring.
+FROM rust:1-alpine AS agent
+RUN apk add --no-cache musl-dev
+WORKDIR /src
+COPY agent-rs/ ./
+ARG VERSION=dev
+RUN XDR_VERSION=${VERSION} cargo build --release --locked -p xdr-agent && \
+    mkdir -p /out/downloads && cp target/release/xdr-agent /out/downloads/xdr-agent-linux-amd64 && \
+    cd /out/downloads && sha256sum xdr-agent-linux-* > SHA256SUMS && echo "${VERSION}" > VERSION
 
 FROM golang:1.26-alpine AS go
 WORKDIR /src
@@ -18,18 +29,11 @@ ARG VERSION=dev
 ENV CGO_ENABLED=0
 RUN go build -trimpath -ldflags "-s -w" -o /out/xdr-server ./cmd/xdr-server && \
     go build -trimpath -ldflags "-s -w" -o /out/xdr-detect ./cmd/xdr-detect
-RUN mkdir -p /out/downloads && \
-    for arch in amd64 arm64; do \
-      GOOS=linux GOARCH=$arch go build -trimpath \
-        -ldflags "-s -w -X github.com/Bogan1011/xdr-agent/internal/agent.Version=${VERSION}" \
-        -o /out/downloads/xdr-agent-linux-$arch ./cmd/xdr-agent; \
-    done && \
-    cd /out/downloads && sha256sum xdr-agent-linux-* > SHA256SUMS && echo "${VERSION}" > VERSION
 
 FROM alpine:3.22
 RUN adduser -D -H -u 10001 xdr && mkdir /data && chown xdr /data
 COPY --from=go /out/xdr-server /out/xdr-detect /usr/local/bin/
-COPY --from=go /out/downloads /opt/xdr/downloads
+COPY --from=agent /out/downloads /opt/xdr/downloads
 COPY --from=web /src/web/dist /opt/xdr/web
 ENV XDR_DATA_DIR=/data XDR_WEB_DIR=/opt/xdr/web XDR_DOWNLOADS_DIR=/opt/xdr/downloads
 USER xdr

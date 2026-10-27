@@ -52,7 +52,7 @@ impl<P: Platform> Live<P> {
                     let exit = pb::ShellExit {
                         session_id: o.session_id,
                         exit_code: -1,
-                        error: format!("remote shell is not supported by xdr-agent-rs {} yet", crate::VERSION),
+                        error: format!("remote shell is not supported by xdr-agent {} yet", crate::VERSION),
                     };
                     let _ = tx
                         .send(pb::LiveUp {

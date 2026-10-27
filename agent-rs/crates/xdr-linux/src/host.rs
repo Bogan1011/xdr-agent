@@ -4,7 +4,7 @@ use std::fs;
 
 use xdr_core::pb;
 
-/// Architecture names as the Go agent and the release manifest use them.
+/// Architecture names as the release manifest uses them.
 pub fn arch() -> &'static str {
     match std::env::consts::ARCH {
         "x86_64" => "amd64",
@@ -17,7 +17,7 @@ pub fn host_info() -> pb::HostInfo {
     let mut h = pb::HostInfo {
         os: "linux".into(),
         arch: arch().into(),
-        agent_version: format!("{}-rs", xdr_core::VERSION),
+        agent_version: xdr_core::VERSION.into(),
         ..Default::default()
     };
     h.hostname = fs::read_to_string("/proc/sys/kernel/hostname")

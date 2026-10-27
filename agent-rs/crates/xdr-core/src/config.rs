@@ -4,8 +4,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-/// Agent configuration. It reads the same YAML file as the Go agent
-/// (/etc/xdr-agent/agent.yaml); keys only the Go agent knows are ignored.
+/// Agent configuration from /etc/xdr-agent/agent.yaml, as written by the
+/// installer. Unknown keys are ignored.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -34,7 +34,7 @@ impl Default for Config {
             server_name: String::new(),
             ca_file: "/etc/xdr-agent/ca.crt".into(),
             enrollment_token: String::new(),
-            state_dir: "/var/lib/xdr-agent-rs".into(),
+            state_dir: "/var/lib/xdr-agent".into(),
             file_paths: [
                 "/etc",
                 "/usr/bin",
@@ -55,9 +55,7 @@ impl Default for Config {
             ]
             .map(String::from)
             .to_vec(),
-            file_exclude: ["/var/lib/xdr-agent", "/var/lib/xdr-agent-rs", "/etc/ld.so.cache"]
-                .map(String::from)
-                .to_vec(),
+            file_exclude: ["/var/lib/xdr-agent", "/etc/ld.so.cache"].map(String::from).to_vec(),
             max_file_watches: 8192,
             network_interval: Duration::from_secs(5),
             queue_bytes: 256 << 20,
