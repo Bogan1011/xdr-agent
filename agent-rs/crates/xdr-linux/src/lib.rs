@@ -2,9 +2,12 @@
 //! file events, /proc/net connections and procfs process identity. eBPF CO-RE
 //! and fanotify prevention are ported next.
 
+pub mod auth;
+pub mod dns;
 pub mod file;
 pub mod host;
 pub mod network;
+pub mod persistence;
 pub mod process;
 pub mod procfs;
 pub mod resolver;
@@ -50,6 +53,11 @@ impl Platform for Linux {
             }),
             Box::new(network::Network {
                 interval: cfg.network_interval,
+            }),
+            Box::new(auth::Auth),
+            Box::new(dns::Dns),
+            Box::new(persistence::Persistence {
+                hasher: self.hasher.clone(),
             }),
         ]
     }

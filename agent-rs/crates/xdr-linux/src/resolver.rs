@@ -59,6 +59,7 @@ impl Resolver {
             pid_namespace: procfs::ns_inode(pe.pid, "pid"),
             mnt_namespace: procfs::ns_inode(pe.pid, "mnt"),
             net_namespace: procfs::ns_inode(pe.pid, "net"),
+            console_session_id: procfs::environ_var(pe.pid, procfs::CONSOLE_SESSION_ENV).unwrap_or_default(),
             ..Default::default()
         };
         match start {
@@ -116,6 +117,7 @@ impl Resolver {
             pid_namespace: info.pid_ns,
             mnt_namespace: info.mnt_ns,
             net_namespace: info.net_ns,
+            console_session_id: info.console_session,
             executable: info.exe,
             command_line: info.args.join(" "),
             user: info.user,

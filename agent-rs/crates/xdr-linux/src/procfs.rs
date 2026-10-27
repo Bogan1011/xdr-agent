@@ -39,6 +39,20 @@ pub struct Info {
     pub net_ns: u64,
     pub exe_uid: u32,
     pub exe_mode: u32,
+    /// XDR_CONSOLE_SESSION from the environment: set in console shells.
+    pub console_session: String,
+}
+
+/// Environment variable that marks processes started from a console shell.
+pub const CONSOLE_SESSION_ENV: &str = "XDR_CONSOLE_SESSION";
+
+/// One variable from /proc/<pid>/environ (the environment at exec).
+pub fn environ_var(pid: u32, name: &str) -> Option<String> {
+    let raw = fs::read(format!("/proc/{pid}/environ")).ok()?;
+    let prefix = format!("{name}=");
+    raw.split(|b| *b == 0)
+        .find_map(|kv| kv.strip_prefix(prefix.as_bytes()))
+        .map(|v| String::from_utf8_lossy(v).into_owned())
 }
 
 /// The unset audit loginuid.
@@ -97,6 +111,7 @@ pub fn read(pid: u32) -> Option<Info> {
     }
     info.user = username(info.uid);
     info.group = groupname(info.gid);
+    info.console_session = environ_var(pid, CONSOLE_SESSION_ENV).unwrap_or_default();
     Some(info)
 }
 

@@ -570,6 +570,10 @@ pub struct ProcessContext {
     pub mnt_namespace: u64,
     #[prost(uint64, tag = "26")]
     pub net_namespace: u64,
+    /// The console shell (PAM live session) the process runs under, from the
+    /// XDR_CONSOLE_SESSION environment variable the agent sets in that shell.
+    #[prost(string, tag = "27")]
+    pub console_session_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::all)]
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

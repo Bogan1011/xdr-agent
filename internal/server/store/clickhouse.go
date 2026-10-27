@@ -159,6 +159,7 @@ TTL toDateTime(ts) + INTERVAL %d DAY`, ttlDays)); err != nil {
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS new_value String DEFAULT ''`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS collector LowCardinality(String) DEFAULT ''`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS summary String DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS console_session String DEFAULT ''`,
 		`ALTER TABLE events ADD INDEX IF NOT EXISTS idx_dns dns_query TYPE bloom_filter GRANULARITY 4`,
 		`ALTER TABLE events ADD INDEX IF NOT EXISTS idx_container container_id TYPE bloom_filter GRANULARITY 4`,
 	} {
@@ -251,6 +252,7 @@ type Event struct {
 	NewValue       string   `json:"new_value,omitempty" ch:"new_value"`
 	Collector      string   `json:"collector,omitempty" ch:"collector"`
 	Summary        string   `json:"summary,omitempty" ch:"summary"`
+	ConsoleSession string   `json:"console_session,omitempty" ch:"console_session"`
 }
 
 func (c *ClickHouse) Insert(ctx context.Context, events []Event) error {

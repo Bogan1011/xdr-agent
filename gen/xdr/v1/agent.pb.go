@@ -2835,11 +2835,14 @@ type ProcessContext struct {
 	Md5      string `protobuf:"bytes,22,opt,name=md5,proto3" json:"md5,omitempty"`
 	Sha1     string `protobuf:"bytes,23,opt,name=sha1,proto3" json:"sha1,omitempty"`
 	// Namespace inode numbers; they differ from the host's inside containers.
-	PidNamespace  uint64 `protobuf:"varint,24,opt,name=pid_namespace,json=pidNamespace,proto3" json:"pid_namespace,omitempty"`
-	MntNamespace  uint64 `protobuf:"varint,25,opt,name=mnt_namespace,json=mntNamespace,proto3" json:"mnt_namespace,omitempty"`
-	NetNamespace  uint64 `protobuf:"varint,26,opt,name=net_namespace,json=netNamespace,proto3" json:"net_namespace,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	PidNamespace uint64 `protobuf:"varint,24,opt,name=pid_namespace,json=pidNamespace,proto3" json:"pid_namespace,omitempty"`
+	MntNamespace uint64 `protobuf:"varint,25,opt,name=mnt_namespace,json=mntNamespace,proto3" json:"mnt_namespace,omitempty"`
+	NetNamespace uint64 `protobuf:"varint,26,opt,name=net_namespace,json=netNamespace,proto3" json:"net_namespace,omitempty"`
+	// The console shell (PAM live session) the process runs under, from the
+	// XDR_CONSOLE_SESSION environment variable the agent sets in that shell.
+	ConsoleSessionId string `protobuf:"bytes,27,opt,name=console_session_id,json=consoleSessionId,proto3" json:"console_session_id,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ProcessContext) Reset() {
@@ -3052,6 +3055,13 @@ func (x *ProcessContext) GetNetNamespace() uint64 {
 		return x.NetNamespace
 	}
 	return 0
+}
+
+func (x *ProcessContext) GetConsoleSessionId() string {
+	if x != nil {
+		return x.ConsoleSessionId
+	}
+	return ""
 }
 
 type ContainerContext struct {
@@ -6538,7 +6548,7 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\t\n" +
-	"\apayload\"\x8f\x06\n" +
+	"\apayload\"\xbd\x06\n" +
 	"\x0eProcessContext\x12!\n" +
 	"\fprocess_guid\x18\x01 \x01(\tR\vprocessGuid\x12\x10\n" +
 	"\x03pid\x18\x02 \x01(\rR\x03pid\x12\x12\n" +
@@ -6570,7 +6580,8 @@ const file_xdr_v1_agent_proto_rawDesc = "" +
 	"\x04sha1\x18\x17 \x01(\tR\x04sha1\x12#\n" +
 	"\rpid_namespace\x18\x18 \x01(\x04R\fpidNamespace\x12#\n" +
 	"\rmnt_namespace\x18\x19 \x01(\x04R\fmntNamespace\x12#\n" +
-	"\rnet_namespace\x18\x1a \x01(\x04R\fnetNamespace\"\xed\x01\n" +
+	"\rnet_namespace\x18\x1a \x01(\x04R\fnetNamespace\x12,\n" +
+	"\x12console_session_id\x18\x1b \x01(\tR\x10consoleSessionId\"\xed\x01\n" +
 	"\x10ContainerContext\x12!\n" +
 	"\fcontainer_id\x18\x01 \x01(\tR\vcontainerId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +

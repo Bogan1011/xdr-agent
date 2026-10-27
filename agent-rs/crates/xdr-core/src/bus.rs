@@ -24,6 +24,17 @@ pub struct EventSink {
 }
 
 impl EventSink {
+    /// A sink not attached to a bus, for tests and tools.
+    pub fn channel(capacity: usize) -> (EventSink, mpsc::Receiver<pb::Event>) {
+        let (tx, rx) = mpsc::channel(capacity);
+        let sink = EventSink {
+            tx,
+            dropped: Arc::new(AtomicU64::new(0)),
+            collector: "",
+        };
+        (sink, rx)
+    }
+
     /// The same sink, stamping events with the collector's name.
     pub fn named(&self, collector: &'static str) -> EventSink {
         EventSink {

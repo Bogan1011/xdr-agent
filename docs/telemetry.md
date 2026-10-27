@@ -54,7 +54,7 @@ duration_ms, pid_ns, mnt_ns, net_ns, container_id, container_name,
 container_image, pod_name, pod_namespace, inode, device, owner, filesystem,
 mount_point, direction, dns_query, dns_type, dns_rcode, dns_answers, category,
 action, outcome, target_user, target_pid, target_process_guid, old_value,
-new_value, collector, summary`.
+new_value, collector, summary, console_session`.
 
 How payloads map onto shared columns:
 

@@ -192,7 +192,7 @@ func applyProcessContext(r *store.Event, pc *xdrv1.ProcessContext) {
 	}
 	r.ProcessGUID, r.ParentGUID = pc.ProcessGuid, pc.ParentProcessGuid
 	r.ParentArgs, r.ParentUser, r.ParentSHA256 = pc.ParentCommandLine, pc.ParentUser, pc.ParentSha256
-	r.PIDNamespace, r.MntNamespace = pc.PidNamespace, pc.MntNamespace
+	r.PIDNamespace, r.MntNamespace, r.ConsoleSession = pc.PidNamespace, pc.MntNamespace, pc.ConsoleSessionId
 	if r.NetNamespace == 0 {
 		r.NetNamespace = pc.NetNamespace
 	}
