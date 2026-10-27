@@ -25,3 +25,10 @@ func TestProcessGUIDStable(t *testing.T) {
 		t.Fatal("start time not resolved")
 	}
 }
+
+// The Rust agent derives the same GUID (agent-rs/crates/xdr-linux/src/procfs.rs).
+func TestGUIDVector(t *testing.T) {
+	if g := guidFor("b", 1, 2); g != "ff16d78f-6c31-9e86-59f9-c481be0a2194" {
+		t.Fatalf("guid = %s", g)
+	}
+}

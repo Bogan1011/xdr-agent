@@ -72,7 +72,11 @@ func StartTimeUnixNano(ticks uint64) int64 {
 // ProcessGUID derives a stable process identity from the boot ID, PID and
 // start ticks, formatted like a UUID.
 func ProcessGUID(pid uint32, startTicks uint64) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s/%d/%d", BootID(), pid, startTicks)))
+	return guidFor(BootID(), pid, startTicks)
+}
+
+func guidFor(bootID string, pid uint32, startTicks uint64) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s/%d/%d", bootID, pid, startTicks)))
 	h := hex.EncodeToString(sum[:16])
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }

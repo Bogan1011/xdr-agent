@@ -1,0 +1,34 @@
+[workspace]
+resolver = "2"
+members = ["crates/xdr-proto", "crates/xdr-core", "crates/xdr-linux", "crates/xdr-agent"]
+
+[workspace.package]
+version = "0.8.0"
+edition = "2024"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+anyhow = "1"
+hex = "0.4"
+libc = "0.2"
+prost = "0.14"
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml_ng = "0.10"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "fs", "io-util", "net"] }
+tonic = { version = "0.14", default-features = false, features = ["transport", "codegen", "gzip", "tls-ring"] }
+tonic-prost = "0.14"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+xdr-proto = { path = "crates/xdr-proto" }
+xdr-core = { path = "crates/xdr-core" }
+xdr-linux = { path = "crates/xdr-linux" }
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 4

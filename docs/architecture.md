@@ -95,6 +95,32 @@ the event bus and the uploader:
 - The last policy, detection content and command state are cached in the same
   database, so a restart without the console enforces the last known policy.
 
+## Rust agent (agent-rs/)
+
+| Crate | Role |
+|---|---|
+| `xdr-proto` | Generated protobuf and gRPC client for `proto/xdr/v1` (committed; `cargo build -p xdr-proto --features regen` updates it). |
+| `xdr-core` | Platform-independent core: config (reads the Go agent's YAML), identity and enrollment, event bus and normalizer, SQLite queue and policy cache, uploader, heartbeat, mTLS transport. |
+| `xdr-linux` | Linux adapters behind the `Platform` trait: netlink process events, inotify files, /proc/net connections, procfs process identity. |
+| `xdr-agent` | The `xdr-agent-rs` binary. |
+
+Flow: collectors (blocking threads) → `EventSink` → normalizer (envelope,
+process context, priority) → local subscribers and the SQLite queue →
+uploader. Until parity it runs beside the Go agent with its own state
+directory (`/var/lib/xdr-agent-rs`) and enrollment, so it shows up as a second
+endpoint, with version `<x.y.z>-rs`. Response commands it does not support yet
+are answered with a failure, not left pending.
+
+Build: `make agent-rs` (Docker, static musl binary in `bin/xdr-agent-rs`) or
+`cd agent-rs && cargo build --release`.
+
+Porting order to parity: eBPF CO-RE collectors (reusing the committed BPF
+objects), YARA scanning and detection content, response actions, prevention
+modules (fanotify exec/script blocking, application control, FIM, firewall,
+IPS, web reputation, device control including read-only USB), tamper
+protection and the self-protection password, PAM, live shell and activity,
+self-update.
+
 ## Data model rules
 
 - **tenant_id everywhere.** Postgres: agents, enrollment tokens, deploy jobs,

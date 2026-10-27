@@ -1,12 +1,16 @@
 VERSION ?= 0.8.0
 LDFLAGS := -s -w -X github.com/Bogan1011/xdr-agent/internal/agent.Version=$(VERSION)
 
-.PHONY: all agent server web proto bpf test up down
+.PHONY: all agent agent-rs server web proto bpf test up down
 
 all: agent server web
 
 agent:
 	CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "$(LDFLAGS)" -o bin/xdr-agent ./cmd/xdr-agent
+
+# Static Rust agent in bin/xdr-agent-rs, built in Docker (no Rust toolchain needed).
+agent-rs:
+	docker build -f agent-rs/Dockerfile --output type=local,dest=bin agent-rs
 
 server:
 	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o bin/xdr-server ./cmd/xdr-server
@@ -26,6 +30,7 @@ bpf:
 test:
 	go vet ./...
 	go test ./...
+	cd agent-rs && cargo test
 
 up:
 	cd deploy && docker compose up -d --build
