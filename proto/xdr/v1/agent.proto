@@ -364,6 +364,35 @@ enum EventType {
   EVENT_TYPE_INTRUSION = 16;
   EVENT_TYPE_DEVICE_CONTROL = 17;
   EVENT_TYPE_APP_CONTROL = 18;
+  // Telemetry spec families (docs/telemetry.md).
+  // A DNS lookup and, when seen, its answer (dns payload).
+  EVENT_TYPE_DNS_QUERY = 19;
+  // Authentication (auth payload): sessions, failures, privilege changes and
+  // local account changes.
+  EVENT_TYPE_AUTH_LOGIN = 20;
+  EVENT_TYPE_AUTH_LOGOUT = 21;
+  EVENT_TYPE_AUTH_FAILED = 22;
+  EVENT_TYPE_SUDO = 23;
+  EVENT_TYPE_SU = 24;
+  EVENT_TYPE_ACCOUNT_CHANGE = 25;
+  // A persistence location changed (persistence payload).
+  EVENT_TYPE_PERSISTENCE = 26;
+  // One process reads or writes another's memory, e.g. ptrace (memory payload).
+  EVENT_TYPE_PROCESS_ACCESS = 27;
+  // Writable and executable memory appeared in a process (memory payload).
+  EVENT_TYPE_MEMORY_PROTECT = 28;
+  // Code injection signs: fileless exec, preload, deleted image (memory payload).
+  EVENT_TYPE_PROCESS_INJECTION = 29;
+  // Kernel and low-level changes (kernel payload).
+  EVENT_TYPE_KERNEL_MODULE = 30;
+  EVENT_TYPE_KERNEL_CHANGE = 31;
+  // A container's first and last process (container context, no payload).
+  EVENT_TYPE_CONTAINER_START = 32;
+  EVENT_TYPE_CONTAINER_STOP = 33;
+  // Host inventory, sent at start and when it changes (inventory payload).
+  EVENT_TYPE_INVENTORY = 34;
+  // A sensitive file (credentials, keys) was opened (file payload).
+  EVENT_TYPE_FILE_OPEN = 35;
 }
 
 // Priority decides what survives when an agent's local queue is under
@@ -393,6 +422,10 @@ message Event {
   // The process that caused the event (for process events, the process itself).
   ProcessContext process_context = 9;
   map<string, string> metadata = 20;
+  // The container the actor runs in; empty on the host.
+  ContainerContext container = 21;
+  // The agent collector that produced the event, e.g. "process" or "dns".
+  string collector = 22;
   oneof payload {
     ProcessEvent process = 10;
     FileEvent file = 11;
@@ -400,6 +433,12 @@ message Event {
     YaraMatch yara = 13;
     TamperEvent tamper = 14;
     PolicyEvent policy = 15;
+    DnsEvent dns = 16;
+    AuthEvent auth = 17;
+    PersistenceEvent persistence = 18;
+    MemoryEvent memory = 19;
+    KernelEvent kernel = 23;
+    InventoryEvent inventory = 24;
   }
 }
 
@@ -421,6 +460,38 @@ message ProcessContext {
   string parent_command_line = 12;
   string parent_user = 13;
   string parent_sha256 = 14;
+  uint32 gid = 15;
+  string group = 16;
+  string cwd = 17;
+  // Controlling terminal, e.g. "pts/0"; empty for daemons.
+  string tty = 18;
+  uint32 session_id = 19;
+  // Effective uid; differs from uid for setuid programs.
+  uint32 euid = 20;
+  // The uid of the original login, kept across sudo and su (audit loginuid).
+  // 4294967295 when unset, e.g. for services.
+  uint32 login_uid = 21;
+  string md5 = 22;
+  string sha1 = 23;
+  // Namespace inode numbers; they differ from the host's inside containers.
+  uint64 pid_namespace = 24;
+  uint64 mnt_namespace = 25;
+  uint64 net_namespace = 26;
+  // The console shell (PAM live session) the process runs under, from the
+  // XDR_CONSOLE_SESSION environment variable the agent sets in that shell.
+  string console_session_id = 27;
+}
+
+message ContainerContext {
+  string container_id = 1;
+  string name = 2;
+  string image = 3;
+  string image_id = 4;
+  // docker, containerd, cri-o or podman.
+  string runtime = 5;
+  string pod_name = 6;
+  string pod_namespace = 7;
+  string pod_uid = 8;
 }
 
 message ProcessEvent {
@@ -435,6 +506,20 @@ message ProcessEvent {
   string sha256 = 9;
   string parent_exe = 10;
   int32 exit_code = 11;
+  uint32 euid = 12;
+  string group = 13;
+  string tty = 14;
+  uint32 session_id = 15;
+  uint32 login_uid = 16;
+  // Effective capabilities (CapEff), hex, when not the full root set or zero.
+  string capabilities = 17;
+  string md5 = 18;
+  string sha1 = 19;
+  // Owner and mode of the executable file.
+  uint32 exe_uid = 20;
+  uint32 exe_mode = 21;
+  // Exit only: how long the process ran.
+  uint64 duration_ms = 22;
 }
 
 message FileEvent {
@@ -454,6 +539,16 @@ message FileEvent {
   string change = 11;
   // FIM only: the baseline hash.
   string old_sha256 = 12;
+  uint64 inode = 13;
+  uint64 device = 14;
+  uint32 gid = 15;
+  // Owner name of the file.
+  string owner = 16;
+  // File system type and mount point holding the file.
+  string filesystem = 17;
+  string mount_point = 18;
+  string md5 = 19;
+  string sha1 = 20;
 }
 
 message NetworkEvent {
@@ -465,6 +560,126 @@ message NetworkEvent {
   uint32 pid = 6;
   string exe = 7;
   uint32 uid = 8;
+  // outbound, inbound or listen.
+  string direction = 9;
+  string user = 10;
+  uint64 net_namespace = 11;
+}
+
+message DnsAnswer {
+  // A, AAAA, CNAME, ...
+  string type = 1;
+  string data = 2;
+  uint32 ttl = 3;
+}
+
+message DnsEvent {
+  string query = 1;
+  // A, AAAA, MX, TXT, ...
+  string query_type = 2;
+  // NOERROR, NXDOMAIN, SERVFAIL...; empty when no answer was seen.
+  string response_code = 3;
+  repeated DnsAnswer answers = 4;
+  string server = 5;
+  uint32 server_port = 6;
+  uint32 pid = 7;
+  string exe = 8;
+  // udp or tcp.
+  string protocol = 9;
+}
+
+message AuthEvent {
+  // login, logout, failed, sudo, su, user_created, user_deleted,
+  // user_modified, group_created, group_deleted, group_modified, password_changed.
+  string action = 1;
+  string user = 2;
+  uint32 uid = 3;
+  string source_ip = 4;
+  uint32 source_port = 5;
+  string tty = 6;
+  // password, publickey, keyboard-interactive, ...
+  string method = 7;
+  bool success = 8;
+  string failure_reason = 9;
+  // sudo and su: the account switched to. Account changes: the account changed.
+  string target_user = 10;
+  // sudo: the command run.
+  string command = 11;
+  // The program that reported it: sshd, sudo, su, login, useradd, ...
+  string service = 12;
+  uint32 pid = 13;
+  string detail = 14;
+  string session_id = 15;
+}
+
+message PersistenceEvent {
+  // systemd_service, systemd_timer, cron, init_script, ssh_authorized_keys,
+  // ssh_config, shell_profile, ld_preload, ld_library_path, udev_rule,
+  // kernel_module_config, sysctl_config, sudoers, passwd, rc_local, motd, at_job.
+  string persistence_type = 1;
+  string path = 2;
+  // created, modified or deleted.
+  string operation = 3;
+  string sha256 = 4;
+  string old_sha256 = 5;
+  // Lines removed and added (text files, truncated).
+  string old_value = 6;
+  string new_value = 7;
+  // The process that made the change, when known.
+  uint32 pid = 8;
+  string exe = 9;
+  string user = 10;
+  uint32 uid = 11;
+}
+
+message MemoryEvent {
+  // ptrace_attach, proc_mem_write, rwx_mapping, memfd_exec, deleted_exe,
+  // ld_preload_env, preload_library.
+  string operation = 1;
+  uint32 source_pid = 2;
+  string source_process_guid = 3;
+  string source_exe = 4;
+  uint32 target_pid = 5;
+  string target_process_guid = 6;
+  string target_exe = 7;
+  string source_user = 8;
+  string target_user = 9;
+  uint64 address = 10;
+  uint64 size = 11;
+  string old_protection = 12;
+  string new_protection = 13;
+  bool rwx = 14;
+  bool injection = 15;
+  string detail = 16;
+}
+
+message KernelEvent {
+  // module_loaded, module_unloaded, sysctl_changed, mounted, unmounted,
+  // kernel_tainted.
+  string action = 1;
+  string name = 2;
+  string old_value = 3;
+  string new_value = 4;
+  string detail = 5;
+  uint32 pid = 6;
+  string exe = 7;
+}
+
+message InventoryItem {
+  string name = 1;
+  string version = 2;
+  string detail = 3;
+}
+
+message InventoryEvent {
+  // system, packages, interfaces or mounts.
+  string kind = 1;
+  // snapshot (full list) or changed (only added and removed items).
+  string action = 2;
+  repeated InventoryItem added = 3;
+  repeated InventoryItem removed = 4;
+  // kind system: uptime, boot_time, cpu_cores, memory_bytes, distribution...
+  map<string, string> attributes = 5;
 }
 
 message YaraMatch {

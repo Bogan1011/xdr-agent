@@ -47,6 +47,19 @@ impl Resolver {
             user: pe.user.clone(),
             uid: pe.uid,
             sha256: pe.sha256.clone(),
+            md5: pe.md5.clone(),
+            sha1: pe.sha1.clone(),
+            gid: pe.gid,
+            group: pe.group.clone(),
+            cwd: pe.cwd.clone(),
+            tty: pe.tty.clone(),
+            session_id: pe.session_id,
+            euid: pe.euid,
+            login_uid: pe.login_uid,
+            pid_namespace: procfs::ns_inode(pe.pid, "pid"),
+            mnt_namespace: procfs::ns_inode(pe.pid, "mnt"),
+            net_namespace: procfs::ns_inode(pe.pid, "net"),
+            console_session_id: procfs::environ_var(pe.pid, procfs::CONSOLE_SESSION_ENV).unwrap_or_default(),
             ..Default::default()
         };
         match start {
@@ -82,15 +95,29 @@ impl Resolver {
                 ..Default::default()
             };
         };
+        let h = if info.exe.is_empty() {
+            procfs::Hashes::default()
+        } else {
+            self.hasher.hashes(&info.exe)
+        };
         let mut c = pb::ProcessContext {
             process_guid: procfs::process_guid(pid, start),
             pid,
             ppid: info.ppid,
-            sha256: if info.exe.is_empty() {
-                String::new()
-            } else {
-                self.hasher.hash(&info.exe)
-            },
+            sha256: h.sha256,
+            sha1: h.sha1,
+            md5: h.md5,
+            gid: info.gid,
+            group: info.group,
+            cwd: info.cwd,
+            tty: info.tty,
+            session_id: info.session_id,
+            euid: info.euid,
+            login_uid: info.login_uid,
+            pid_namespace: info.pid_ns,
+            mnt_namespace: info.mnt_ns,
+            net_namespace: info.net_ns,
+            console_session_id: info.console_session,
             executable: info.exe,
             command_line: info.args.join(" "),
             user: info.user,
@@ -169,6 +196,13 @@ impl ProcessResolver for Resolver {
             }
             _ => self.lookup(pid, ts, 0),
         })
+    }
+
+    fn container(&self, e: &pb::Event) -> Option<pb::ContainerContext> {
+        match actor_pid(e) {
+            0 => None,
+            pid => crate::container::of_pid(pid),
+        }
     }
 }
 

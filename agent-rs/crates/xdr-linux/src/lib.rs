@@ -3,10 +3,18 @@
 //! and fanotify prevention are ported next. Response actions live in
 //! [`response`].
 
+pub mod auth;
+pub mod container;
+pub mod credaccess;
+pub mod dns;
 pub mod file;
 pub mod host;
+pub mod inventory;
+pub mod kernel;
+pub mod memory;
 pub mod migrate;
 pub mod network;
+pub mod persistence;
 pub mod process;
 pub mod procfs;
 pub mod resolver;
@@ -58,6 +66,25 @@ impl Platform for Linux {
             }),
             Box::new(network::Network {
                 interval: cfg.network_interval,
+            }),
+            Box::new(auth::Auth),
+            Box::new(dns::Dns),
+            Box::new(memory::Memory {
+                interval: std::time::Duration::from_secs(30),
+            }),
+            Box::new(credaccess::CredentialAccess),
+            Box::new(kernel::Kernel {
+                interval: std::time::Duration::from_secs(15),
+            }),
+            Box::new(inventory::Inventory {
+                interval: std::time::Duration::from_secs(6 * 3600),
+                state: cfg.state_path("inventory.json"),
+            }),
+            Box::new(container::Containers {
+                interval: std::time::Duration::from_secs(10),
+            }),
+            Box::new(persistence::Persistence {
+                hasher: self.hasher.clone(),
             }),
         ]
     }

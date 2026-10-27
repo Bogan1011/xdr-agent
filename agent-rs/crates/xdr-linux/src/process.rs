@@ -25,8 +25,14 @@ const MAX_TRACKED: usize = 65_536;
 
 pub struct Process {
     pub hasher: Arc<Hasher>,
-    /// pid → exe, for exit events and parent lookup.
-    procs: HashMap<u32, String>,
+    /// pid → exe and start time, for exit events and parent lookup.
+    procs: HashMap<u32, Tracked>,
+}
+
+struct Tracked {
+    exe: String,
+    /// Unix nanoseconds; 0 when unknown.
+    start: i64,
 }
 
 impl Process {
@@ -168,38 +174,40 @@ impl Process {
         if self.procs.len() >= MAX_TRACKED {
             self.procs.clear();
         }
-        self.procs.insert(pid, info.exe.clone());
-        let mut parent = self.procs.get(&info.ppid).cloned().unwrap_or_default();
+        let start = procfs::start_ticks(pid).map_or(0, procfs::start_time_unix_nano);
+        self.procs.insert(
+            pid,
+            Tracked {
+                exe: info.exe.clone(),
+                start,
+            },
+        );
+        let mut parent = self.procs.get(&info.ppid).map(|t| t.exe.clone()).unwrap_or_default();
         if parent.is_empty() && info.ppid != 0 {
             parent = procfs::readlink(&format!("/proc/{}/exe", info.ppid));
         }
+        let h = self.hasher.hashes(&info.exe);
         let mut e = new_event(EventType::ProcessExec);
-        e.payload = Some(pb::event::Payload::Process(pb::ProcessEvent {
-            pid: info.pid,
-            ppid: info.ppid,
-            uid: info.uid,
-            gid: info.gid,
-            user: info.user,
-            sha256: self.hasher.hash(&info.exe),
-            exe: info.exe,
-            args: info.args,
-            cwd: info.cwd,
-            parent_exe: parent,
-            exit_code: 0,
-        }));
+        e.payload = Some(pb::event::Payload::Process(exec_event(info, h, parent)));
         sink.emit(e);
     }
 
     fn on_exit(&mut self, pid: u32, code: u32, sink: &EventSink) {
-        let Some(exe) = self.procs.remove(&pid) else {
+        let Some(t) = self.procs.remove(&pid) else {
             return;
         };
         let mut e = new_event(EventType::ProcessExit);
+        let duration_ms = if t.start > 0 {
+            ((e.timestamp_unix_nano - t.start).max(0) / 1_000_000) as u64
+        } else {
+            0
+        };
         // The kernel reports the raw wait status; the high byte is the exit status.
         e.payload = Some(pb::event::Payload::Process(pb::ProcessEvent {
             pid,
-            exe,
+            exe: t.exe,
             exit_code: (code >> 8) as i32,
+            duration_ms,
             ..Default::default()
         }));
         sink.emit(e);
@@ -214,9 +222,61 @@ impl Process {
             if let Some(pid) = ent.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) {
                 let exe = procfs::readlink(&format!("/proc/{pid}/exe"));
                 if !exe.is_empty() {
-                    self.procs.insert(pid, exe);
+                    let start = procfs::start_ticks(pid).map_or(0, procfs::start_time_unix_nano);
+                    self.procs.insert(pid, Tracked { exe, start });
                 }
             }
         }
+    }
+}
+
+/// Capability sets not worth reporting: none, or everything (plain root).
+fn notable_caps(cap_eff: &str) -> String {
+    let v = u64::from_str_radix(cap_eff, 16).unwrap_or(0);
+    // Full sets differ by kernel (CAP_LAST_CAP), so anything with all of the
+    // first 38 capabilities counts as full.
+    if v == 0 || v & 0x3f_ffff_ffff == 0x3f_ffff_ffff {
+        String::new()
+    } else {
+        cap_eff.trim_start_matches('0').to_string()
+    }
+}
+
+fn exec_event(info: procfs::Info, h: procfs::Hashes, parent_exe: String) -> pb::ProcessEvent {
+    pb::ProcessEvent {
+        pid: info.pid,
+        ppid: info.ppid,
+        uid: info.uid,
+        gid: info.gid,
+        euid: info.euid,
+        group: info.group,
+        tty: info.tty,
+        session_id: info.session_id,
+        login_uid: info.login_uid,
+        capabilities: notable_caps(&info.cap_eff),
+        user: info.user,
+        sha256: h.sha256,
+        sha1: h.sha1,
+        md5: h.md5,
+        exe: info.exe,
+        exe_uid: info.exe_uid,
+        exe_mode: info.exe_mode,
+        args: info.args,
+        cwd: info.cwd,
+        parent_exe,
+        exit_code: 0,
+        duration_ms: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reports_only_partial_capabilities() {
+        assert_eq!(notable_caps("0000000000000000"), "");
+        assert_eq!(notable_caps("000001ffffffffff"), "");
+        assert_eq!(notable_caps("0000000000003000"), "3000");
     }
 }
