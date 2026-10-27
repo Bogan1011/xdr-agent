@@ -69,10 +69,6 @@ func New(cfg Config, db *store.Postgres, events *store.ClickHouse, ca *pki.CA, d
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("POST /api/v1/login", a.login)
-	mux.HandleFunc("POST /api/v1/logout", a.logout)
-	a.iamRoutes(mux)
-
 	mux.HandleFunc("GET /api/v1/agents", a.auth(a.listAgents))
 	mux.HandleFunc("GET /api/v1/agents/{id}", a.auth(a.getAgent))
 	mux.HandleFunc("POST /api/v1/agents/{id}/revoke", a.auth(a.revokeAgent))
