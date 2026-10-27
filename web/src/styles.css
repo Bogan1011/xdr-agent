@@ -345,3 +345,27 @@ td.wrap { white-space: normal; word-break: break-all; }
 .wb-sub { fill: var(--muted); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .story-alert { margin: 6px 0; }
 .wb-counts { fill: var(--series-file); }
+/* Process graph: pan and zoom canvas with overlay tools and a side drawer. */
+.pg { position: relative; height: calc(100vh - 230px); min-height: 460px; overflow: hidden; border-radius: inherit;
+  background: radial-gradient(circle at 40% 45%, var(--surface-2), var(--page)); }
+.pg-canvas { position: absolute; inset: 0; cursor: grab; touch-action: none; user-select: none; }
+.pg-canvas.dragging { cursor: grabbing; }
+.pg-canvas svg { display: block; }
+.pg-tools { position: absolute; top: 12px; left: 12px; display: flex; gap: 6px; }
+.pg-tools button { min-width: 34px; padding: 4px 10px; font-size: 13px;
+  background: color-mix(in srgb, var(--surface) 85%, transparent); backdrop-filter: blur(4px); }
+.pg-hint { position: absolute; left: 12px; bottom: 10px; font-size: 12px; pointer-events: none; }
+.pg-note { position: absolute; right: 12px; bottom: 10px; font-size: 12px; }
+.pg-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: min(340px, 90%); overflow-y: auto; padding: 14px 16px;
+  background: var(--surface); border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgb(0 0 0 / 0.35); animation: pg-slide 0.2s ease; }
+.pg-drawer h3 { margin: 0; }
+@keyframes pg-slide { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.pg-facts { display: grid; grid-template-columns: 1fr; gap: 2px; font-size: 13px; margin: 10px 0; }
+.pg-facts dt { color: var(--text-2); font-size: 12px; margin-top: 8px; }
+.pg-facts dd { margin: 0; word-break: break-all; }
+.pg-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.wb-halo { fill: none; stroke: var(--accent); stroke-width: 1.5; opacity: 0.5; stroke-dasharray: 4 4; }
+.wb-more .wb-disc { stroke-dasharray: 3 3; }
+.wb-more .wb-label { fill: var(--text-2); font-size: 12px; }
+.wb-node .wb-disc { transition: stroke 0.15s, fill 0.15s; }
