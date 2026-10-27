@@ -138,6 +138,7 @@ const (
 	AgentService_GetElevation_FullMethodName             = "/xdr.v1.AgentService/GetElevation"
 	AgentService_ReportPrivilegedAccounts_FullMethodName = "/xdr.v1.AgentService/ReportPrivilegedAccounts"
 	AgentService_UploadSessionRecording_FullMethodName   = "/xdr.v1.AgentService/UploadSessionRecording"
+	AgentService_Live_FullMethodName                     = "/xdr.v1.AgentService/Live"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -167,6 +168,10 @@ type AgentServiceClient interface {
 	ReportPrivilegedAccounts(ctx context.Context, in *PrivilegedAccounts, opts ...grpc.CallOption) (*PrivilegedAccountsAck, error)
 	// One finished sudo session recorded by sudo's I/O logging.
 	UploadSessionRecording(ctx context.Context, in *SessionRecording, opts ...grpc.CallOption) (*SessionRecordingAck, error)
+	// A long-lived stream the agent keeps open so the console reaches it at
+	// once: remote shells and the live activity view. The agent dials out, so
+	// the host needs no inbound port.
+	Live(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[LiveUp, LiveDown], error)
 }
 
 type agentServiceClient struct {
@@ -267,6 +272,19 @@ func (c *agentServiceClient) UploadSessionRecording(ctx context.Context, in *Ses
 	return out, nil
 }
 
+func (c *agentServiceClient) Live(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[LiveUp, LiveDown], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[0], AgentService_Live_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[LiveUp, LiveDown]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_LiveClient = grpc.BidiStreamingClient[LiveUp, LiveDown]
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -294,6 +312,10 @@ type AgentServiceServer interface {
 	ReportPrivilegedAccounts(context.Context, *PrivilegedAccounts) (*PrivilegedAccountsAck, error)
 	// One finished sudo session recorded by sudo's I/O logging.
 	UploadSessionRecording(context.Context, *SessionRecording) (*SessionRecordingAck, error)
+	// A long-lived stream the agent keeps open so the console reaches it at
+	// once: remote shells and the live activity view. The agent dials out, so
+	// the host needs no inbound port.
+	Live(grpc.BidiStreamingServer[LiveUp, LiveDown]) error
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -330,6 +352,9 @@ func (UnimplementedAgentServiceServer) ReportPrivilegedAccounts(context.Context,
 }
 func (UnimplementedAgentServiceServer) UploadSessionRecording(context.Context, *SessionRecording) (*SessionRecordingAck, error) {
 	return nil, status.Error(codes.Unimplemented, "method UploadSessionRecording not implemented")
+}
+func (UnimplementedAgentServiceServer) Live(grpc.BidiStreamingServer[LiveUp, LiveDown]) error {
+	return status.Error(codes.Unimplemented, "method Live not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -514,6 +539,13 @@ func _AgentService_UploadSessionRecording_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_Live_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AgentServiceServer).Live(&grpc.GenericServerStream[LiveUp, LiveDown]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_LiveServer = grpc.BidiStreamingServer[LiveUp, LiveDown]
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -558,6 +590,13 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AgentService_UploadSessionRecording_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Live",
+			Handler:       _AgentService_Live_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
 	Metadata: "xdr/v1/agent.proto",
 }

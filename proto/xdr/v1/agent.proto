@@ -35,6 +35,11 @@ service AgentService {
   rpc ReportPrivilegedAccounts(PrivilegedAccounts) returns (PrivilegedAccountsAck);
   // One finished sudo session recorded by sudo's I/O logging.
   rpc UploadSessionRecording(SessionRecording) returns (SessionRecordingAck);
+
+  // A long-lived stream the agent keeps open so the console reaches it at
+  // once: remote shells and the live activity view. The agent dials out, so
+  // the host needs no inbound port.
+  rpc Live(stream LiveUp) returns (stream LiveDown);
 }
 
 message HostInfo {
@@ -486,3 +491,97 @@ message SessionRecording {
 }
 
 message SessionRecordingAck {}
+
+// Console to agent, on the live stream.
+message LiveDown {
+  oneof msg {
+    ShellOpen shell_open = 1;
+    ShellData shell_input = 2;
+    ShellResize shell_resize = 3;
+    ShellClose shell_close = 4;
+    ActivityRequest activity = 5;
+  }
+}
+
+// Agent to console, on the live stream.
+message LiveUp {
+  oneof msg {
+    ShellData shell_output = 1;
+    ShellExit shell_exit = 2;
+    Activity activity = 3;
+  }
+}
+
+// Start a login shell for user on a new pseudo-terminal.
+message ShellOpen {
+  string session_id = 1;
+  string user = 2;
+  uint32 cols = 3;
+  uint32 rows = 4;
+}
+
+message ShellData {
+  string session_id = 1;
+  bytes data = 2;
+}
+
+message ShellResize {
+  string session_id = 1;
+  uint32 cols = 2;
+  uint32 rows = 3;
+}
+
+message ShellClose {
+  string session_id = 1;
+}
+
+message ShellExit {
+  string session_id = 1;
+  int32 exit_code = 2;
+  // Why the shell could not start or ended abnormally.
+  string error = 3;
+}
+
+message ActivityRequest {
+  string request_id = 1;
+}
+
+// What is happening on the host right now.
+message Activity {
+  string request_id = 1;
+  repeated TerminalSession terminals = 2;
+  // The busiest processes, by CPU since the previous request.
+  repeated LiveProcess top = 3;
+  double load1 = 4;
+  uint64 mem_total_bytes = 5;
+  uint64 mem_available_bytes = 6;
+  uint64 uptime_seconds = 7;
+}
+
+// A terminal someone is logged in on (SSH, console or a remote shell from
+// the XDR console), and what runs in it.
+message TerminalSession {
+  string tty = 1;
+  string user = 2;
+  // Client address for SSH sessions.
+  string from = 3;
+  int64 login_unix = 4;
+  // Seconds since the terminal last had input.
+  uint64 idle_seconds = 5;
+  // The command in the foreground, i.e. what the user is running now.
+  string current = 6;
+  repeated LiveProcess processes = 7;
+  // A remote shell opened from the XDR console.
+  bool console = 8;
+}
+
+message LiveProcess {
+  uint32 pid = 1;
+  uint32 ppid = 2;
+  string user = 3;
+  string tty = 4;
+  string command = 5;
+  double cpu_percent = 6;
+  uint64 rss_bytes = 7;
+  int64 start_unix = 8;
+}

@@ -12,6 +12,7 @@ import Rules from "./pages/Rules";
 import IOCs from "./pages/IOCs";
 import PAM from "./pages/PAM";
 import Policies, { PolicyEditor } from "./pages/Policies";
+import RemoteAccess, { RemoteShell, WatchShell } from "./pages/RemoteAccess";
 import { usePoll } from "./hooks";
 import { icons } from "./icons";
 
@@ -61,7 +62,10 @@ function Shell({ user, onSignOut }: { user: string; onSignOut: () => void }) {
     {
       title: "Identity & access",
       icon: "key",
-      items: [{ to: "/pam", label: "Privileged access", badge: pam.data?.pending || undefined }],
+      items: [
+        { to: "/remote", label: "Remote access" },
+        { to: "/pam", label: "Privileged access", badge: pam.data?.pending || undefined },
+      ],
     },
   ];
 
@@ -135,6 +139,9 @@ function Shell({ user, onSignOut }: { user: string; onSignOut: () => void }) {
             <Route path="/policies" element={<Policies />} />
             <Route path="/policies/:id" element={<PolicyEditor />} />
             <Route path="/prevention" element={<Navigate to="/policies" replace />} />
+            <Route path="/remote" element={<RemoteAccess />} />
+            <Route path="/remote/:id" element={<RemoteShell />} />
+            <Route path="/remote/watch/:sid" element={<WatchShell />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

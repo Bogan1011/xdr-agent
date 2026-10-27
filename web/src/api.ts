@@ -459,7 +459,63 @@ export const api = {
   setAgentPolicy: (agentId: string, policy_id: number) =>
     request<void>("PUT", `/api/v1/agents/${encodeURIComponent(agentId)}/policy`, { policy_id }),
   pamSession: (id: number) => request<{ session: PamSession; output: string }>("GET", `/api/v1/pam/sessions/${id}`),
+  agentLive: (agentId: string) => request<LiveInfo>("GET", `/api/v1/agents/${encodeURIComponent(agentId)}/live`),
+  liveShells: () => request<RemoteShell[]>("GET", "/api/v1/live/shells"),
+  closeShell: (sid: string) => request<void>("POST", `/api/v1/live/shells/${encodeURIComponent(sid)}/close`, {}),
 };
+
+export interface LiveProcess {
+  pid: number;
+  ppid?: number;
+  user: string;
+  tty?: string;
+  command: string;
+  cpu_percent?: number;
+  rss_bytes?: number;
+  start_unix?: number;
+}
+
+export interface TerminalSession {
+  tty: string;
+  user: string;
+  from?: string;
+  login_unix?: number;
+  idle_seconds?: number;
+  current?: string;
+  processes?: LiveProcess[];
+  console?: boolean;
+}
+
+export interface Activity {
+  terminals?: TerminalSession[];
+  top?: LiveProcess[];
+  load1?: number;
+  mem_total_bytes?: number;
+  mem_available_bytes?: number;
+  uptime_seconds?: number;
+}
+
+export interface RemoteShell {
+  id: string;
+  agent_id: string;
+  hostname: string;
+  user: string;
+  admin: string;
+  started_at: string;
+  viewers: number;
+}
+
+export interface LiveInfo {
+  online: boolean;
+  error?: string;
+  activity?: Activity;
+  shells: RemoteShell[];
+}
+
+// socketUrl is a WebSocket URL on this console for an API path.
+export function socketUrl(path: string): string {
+  return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${path}`;
+}
 
 export const commandLabels: Record<CommandType, string> = {
   kill_process: "Kill process",

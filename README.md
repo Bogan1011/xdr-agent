@@ -268,7 +268,7 @@ with `cd web && npm run dev` (it proxies `/api` to `:8080`).
    [comparison](docs/comparison.md) with Vision One and CrowdStrike Falcon.
 5. **Prevention** (done): exec blocking of hash IOCs, file integrity
    monitoring with baselines, host firewall policy.
-6. **Policies** (this release, 0.5.0): named policies assigned to endpoints
+6. **Policies** (this release, 0.6.0): named policies assigned to endpoints
    with eight modules: anti-malware, web reputation, file integrity,
    firewall, intrusion prevention, device control, activity monitoring and
    application control.

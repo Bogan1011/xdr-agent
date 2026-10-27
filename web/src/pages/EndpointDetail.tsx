@@ -8,6 +8,7 @@ import { ProtectionBadge, StatusBadge, VersionCell, isOutdated, isSet } from "./
 import { CommandList, EndpointResponse } from "../components/Response";
 import { AlertTable } from "./Alerts";
 import { moduleOn } from "../components/PolicyModules";
+import LiveView from "../components/LiveView";
 
 export default function EndpointDetail() {
   const { id = "" } = useParams();
@@ -80,6 +81,7 @@ export default function EndpointDetail() {
           <h1>{a.hostname}</h1>
         </div>
         <div className="actions">
+          {!a.revoked && <Link className="button primary" to={`/remote/${id}`}>Remote shell</Link>}
           {!a.revoked && !a.updating && isOutdated(a, fleet.data) && <button onClick={update}>Update to {fleet.data!.version}</button>}
           {!a.revoked && !a.pending_command && <button onClick={uninstall}>Uninstall</button>}
           {!a.revoked && <button onClick={revoke}>Revoke</button>}
@@ -131,6 +133,8 @@ export default function EndpointDetail() {
           <div className="wide"><dt>Agent ID</dt><dd className="mono">{a.id}</dd></div>
         </dl>
       </section>
+
+      {!a.revoked && <LiveView agentId={id} />}
 
       <section className="card">
         <h2>Open alerts</h2>

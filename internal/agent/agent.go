@@ -42,6 +42,7 @@ type Agent struct {
 	tamper *Tamper
 	pam    *PAM
 	prev   *Prevention
+	live   *Live
 	upd    updater
 	// ctx is cancelled by Stop, e.g. to restart into an updated binary.
 	ctx    context.Context
@@ -59,6 +60,7 @@ func New(cfg *Config, log *slog.Logger) *Agent {
 	a.tamper = newTamper(cfg, log.With("component", "tamper"), a.tamperEvent)
 	a.pam = newPAM(cfg, log.With("component", "pam"))
 	a.prev = newPrevention(a, log.With("component", "prevention"))
+	a.live = newLive(cfg, log.With("component", "live"))
 	a.ctx, a.cancel = context.WithCancel(context.Background())
 	return a
 }
@@ -197,10 +199,11 @@ func (a *Agent) Run() error {
 			a.runCollector(ctx, c)
 		}(c)
 	}
-	wg.Add(5)
+	wg.Add(6)
 	go func() { defer wg.Done(); a.scanner.Run(ctx) }()
 	go func() { defer wg.Done(); a.prev.Run(ctx) }()
 	go func() { defer wg.Done(); a.pam.Run(ctx, client) }()
+	go func() { defer wg.Done(); a.live.Run(ctx, client) }()
 	go func() { defer wg.Done(); a.sendLoop(ctx, client) }()
 	go func() { defer wg.Done(); a.heartbeatLoop(ctx, client, host) }()
 	wg.Wait()

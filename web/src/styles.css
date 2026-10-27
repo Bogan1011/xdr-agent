@@ -297,3 +297,8 @@ pre.code.terminal { white-space: pre-wrap; word-break: normal; overflow-wrap: an
   .policy-layout { grid-template-columns: minmax(0, 1fr); }
   .module-nav { flex-direction: row; flex-wrap: wrap; }
 }
+
+/* remote shell */
+.terminal-wrap { display: flex; flex-direction: column; gap: 8px; }
+.terminal { height: calc(100vh - 290px); min-height: 360px; background: #05070d; border: 1px solid var(--border); border-radius: 6px; padding: 6px; overflow: hidden; }
+td.wrap { white-space: normal; word-break: break-all; }

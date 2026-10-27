@@ -20,6 +20,7 @@ import (
 
 	"github.com/Bogan1011/xdr-agent/internal/server/deploy"
 	"github.com/Bogan1011/xdr-agent/internal/server/detect"
+	"github.com/Bogan1011/xdr-agent/internal/server/live"
 	"github.com/Bogan1011/xdr-agent/internal/server/pki"
 	"github.com/Bogan1011/xdr-agent/internal/server/store"
 )
@@ -47,6 +48,7 @@ type API struct {
 	ca     *pki.CA
 	deploy *deploy.Deployer
 	detect *detect.Service
+	live   *live.Hub
 	log    *slog.Logger
 
 	mu       sync.Mutex
@@ -54,7 +56,8 @@ type API struct {
 }
 
 func New(cfg Config, db *store.Postgres, events *store.ClickHouse, ca *pki.CA, dep *deploy.Deployer, det *detect.Service, log *slog.Logger) *API {
-	return &API{cfg: cfg, db: db, events: events, ca: ca, deploy: dep, detect: det, log: log, sessions: map[string]time.Time{}}
+	return &API{cfg: cfg, db: db, events: events, ca: ca, deploy: dep, detect: det, log: log, sessions: map[string]time.Time{},
+		live: &live.Hub{Log: log}}
 }
 
 func (a *API) Handler() http.Handler {
@@ -83,6 +86,7 @@ func (a *API) Handler() http.Handler {
 	a.fleetRoutes(mux)
 	a.pamRoutes(mux)
 	a.preventionRoutes(mux)
+	a.liveRoutes(mux)
 
 	// Public: the installer fetches these before the host has any identity.
 	mux.HandleFunc("GET /pki/ca.crt", a.caCert)
