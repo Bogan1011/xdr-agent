@@ -7,11 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
-	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -24,6 +22,7 @@ import (
 	"github.com/Bogan1011/xdr-agent/internal/policy"
 	"github.com/Bogan1011/xdr-agent/internal/server/detect"
 	"github.com/Bogan1011/xdr-agent/internal/server/live"
+	"github.com/Bogan1011/xdr-agent/internal/server/pipeline"
 	"github.com/Bogan1011/xdr-agent/internal/server/pki"
 	"github.com/Bogan1011/xdr-agent/internal/server/release"
 	"github.com/Bogan1011/xdr-agent/internal/server/store"
@@ -74,23 +73,12 @@ type Agents struct {
 	DB     *store.Postgres
 	Events *store.ClickHouse
 	Detect *detect.Service
-	Log    *slog.Logger
+	// Pipeline normalizes, enriches and stores events and runs detection.
+	Pipeline *pipeline.Pipeline
+	Log      *slog.Logger
 	// DownloadsDir holds the agent binaries offered for self-update.
 	DownloadsDir string
 	Hub          *live.Hub
-}
-
-var commandTypes = map[string]xdrv1.CommandType{
-	"kill_process":     xdrv1.CommandType_COMMAND_TYPE_KILL_PROCESS,
-	"quarantine_file":  xdrv1.CommandType_COMMAND_TYPE_QUARANTINE_FILE,
-	"restore_file":     xdrv1.CommandType_COMMAND_TYPE_RESTORE_FILE,
-	"isolate_host":     xdrv1.CommandType_COMMAND_TYPE_ISOLATE_HOST,
-	"unisolate_host":   xdrv1.CommandType_COMMAND_TYPE_UNISOLATE_HOST,
-	"scan_path":        xdrv1.CommandType_COMMAND_TYPE_SCAN_PATH,
-	"update_agent":     xdrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT,
-	"grant_elevation":  xdrv1.CommandType_COMMAND_TYPE_GRANT_ELEVATION,
-	"revoke_elevation": xdrv1.CommandType_COMMAND_TYPE_REVOKE_ELEVATION,
-	"fim_rebaseline":   xdrv1.CommandType_COMMAND_TYPE_FIM_REBASELINE,
 }
 
 type ctxKey struct{}
@@ -189,7 +177,7 @@ func (s *Agents) Heartbeat(ctx context.Context, req *xdrv1.HeartbeatRequest) (*x
 		s.Log.Error("take response commands", "agent_id", a.id, "err", err)
 	}
 	for _, c := range cmds {
-		resp.Commands = append(resp.Commands, &xdrv1.AgentCommand{Id: c.ID, Type: commandTypes[c.Type], Args: c.Args})
+		resp.Commands = append(resp.Commands, live.CommandProto(c))
 	}
 	cmd, err := s.DB.TakeCommand(ctx, a.id)
 	if err != nil {
@@ -232,16 +220,12 @@ func (s *Agents) SendEvents(ctx context.Context, req *xdrv1.EventBatch) (*xdrv1.
 	if len(req.Events) > maxBatch {
 		return nil, status.Errorf(codes.InvalidArgument, "batch larger than %d events", maxBatch)
 	}
-	rows := make([]store.Event, 0, len(req.Events))
-	for _, e := range req.Events {
-		rows = append(rows, toRow(a, e))
-	}
-	if err := s.Events.Insert(ctx, rows); err != nil {
+	rows, err := s.Pipeline.Ingest(ctx, pipeline.Source{TenantID: a.tenant, AgentID: a.id, Hostname: a.hostname}, req.Events)
+	if err != nil {
 		s.Log.Error("insert events", "agent_id", a.id, "err", err)
 		return nil, status.Error(codes.Unavailable, "event store unavailable")
 	}
 	_ = s.DB.Touch(ctx, a.id)
-	s.Detect.Process(ctx, rows)
 	return &xdrv1.SendEventsResponse{Accepted: uint64(len(rows))}, nil
 }
 
@@ -307,128 +291,6 @@ func truncate(s string, n int) string {
 		return s[:n]
 	}
 	return s
-}
-
-// EventTypeName is the stored name of an event type, e.g. "process_exec".
-func EventTypeName(t xdrv1.EventType) string {
-	return strings.ToLower(strings.TrimPrefix(t.String(), "EVENT_TYPE_"))
-}
-
-func toRow(a agentCtx, e *xdrv1.Event) store.Event {
-	// Identity comes from the authenticated certificate and the enrollment
-	// record, never from what the agent claims in the envelope.
-	r := store.Event{
-		Time:          time.Unix(0, e.TimestampUnixNano).UTC(),
-		TenantID:      a.tenant,
-		AgentID:       a.id,
-		EndpointID:    a.id,
-		Hostname:      a.hostname,
-		EventID:       e.Id,
-		SchemaVersion: uint16(e.SchemaVersion),
-		Type:          EventTypeName(e.Type),
-		Priority:      PriorityName(e.Priority),
-		Metadata:      e.Metadata,
-	}
-	// Agent clocks can be wrong; keep events inside a sane window so they
-	// land in a valid partition.
-	if now := time.Now(); r.Time.After(now.Add(time.Hour)) || r.Time.Before(now.AddDate(0, 0, -30)) {
-		r.Time = now.UTC()
-	}
-	switch p := e.Payload.(type) {
-	case *xdrv1.Event_Process:
-		pe := p.Process
-		r.PID, r.PPID, r.UID, r.User = pe.Pid, pe.Ppid, pe.Uid, pe.User
-		r.Exe, r.Args, r.Cwd, r.SHA256 = pe.Exe, joinArgs(pe.Args), pe.Cwd, pe.Sha256
-		r.ParentExe, r.ExitCode = pe.ParentExe, pe.ExitCode
-	case *xdrv1.Event_File:
-		fe := p.File
-		r.Path, r.OldPath, r.Size, r.Mode, r.UID, r.SHA256 = fe.Path, fe.OldPath, fe.Size, fe.Mode, fe.Uid, fe.Sha256
-		r.PID, r.PPID, r.Exe, r.User = fe.Pid, fe.Ppid, fe.Exe, fe.User
-		if fe.Change != "" {
-			// FIM drift: what changed is kept in args so rules can match it.
-			r.Args = fe.Change
-			if fe.OldSha256 != "" {
-				r.Args += " old_sha256=" + fe.OldSha256
-			}
-		}
-	case *xdrv1.Event_Network:
-		ne := p.Network
-		r.Protocol, r.LocalAddr, r.LocalPort = ne.Protocol, ne.LocalAddr, ne.LocalPort
-		r.RemoteAddr, r.RemotePort, r.PID, r.Exe, r.UID = ne.RemoteAddr, ne.RemotePort, ne.Pid, ne.Exe, ne.Uid
-	case *xdrv1.Event_Yara:
-		y := p.Yara
-		r.Path, r.SHA256, r.Size, r.PID = y.Path, y.Sha256, y.Size, y.Pid
-		// The matched rule names are kept in args, then what anti-malware did.
-		r.Args = strings.Join(y.Rules, ", ")
-		if y.Action != "" {
-			r.Args += "; " + y.Action
-		}
-	case *xdrv1.Event_Tamper:
-		t := p.Tamper
-		// The action is kept in path so rules can match it exactly.
-		r.Path, r.Args, r.PID, r.Exe = t.Action, t.Detail, t.Pid, t.Exe
-	case *xdrv1.Event_Policy:
-		pe := p.Policy
-		// Like tamper events, the action is kept in path.
-		r.Path, r.Args, r.RemoteAddr, r.PID, r.Exe, r.SHA256, r.User = pe.Action, pe.Detail, pe.RemoteAddr, pe.Pid, pe.Exe, pe.Sha256, pe.User
-	}
-	applyProcessContext(&r, e.ProcessContext)
-	return r
-}
-
-// applyProcessContext adds the actor's identity and parent. Payload fields
-// win; the context fills what a collector did not know, e.g. the user behind
-// a network connection.
-func applyProcessContext(r *store.Event, pc *xdrv1.ProcessContext) {
-	if pc == nil {
-		return
-	}
-	r.ProcessGUID, r.ParentGUID = pc.ProcessGuid, pc.ParentProcessGuid
-	r.ParentArgs, r.ParentUser, r.ParentSHA256 = pc.ParentCommandLine, pc.ParentUser, pc.ParentSha256
-	if pc.StartTimeUnixNano > 0 {
-		r.ProcessStart = time.Unix(0, pc.StartTimeUnixNano).UTC()
-	}
-	if r.PID == 0 {
-		r.PID = pc.Pid
-	}
-	if r.PPID == 0 {
-		r.PPID = pc.Ppid
-	}
-	if r.User == "" {
-		r.User = pc.User
-	}
-	if r.ParentExe == "" {
-		r.ParentExe = pc.ParentExecutable
-	}
-	// For file, network and policy events exe is the actor; keep the
-	// payload's value when it names something else (a blocked or scanned file).
-	if r.Exe == "" && r.Type != "exec_blocked" {
-		r.Exe = pc.Executable
-	}
-}
-
-// PriorityName is the stored form of a priority, e.g. "critical".
-func PriorityName(p xdrv1.Priority) string {
-	if p == xdrv1.Priority_PRIORITY_UNSPECIFIED {
-		return ""
-	}
-	return strings.ToLower(strings.TrimPrefix(p.String(), "PRIORITY_"))
-}
-
-// joinArgs renders argv as a shell-like string; arguments with spaces are quoted.
-func joinArgs(args []string) string {
-	var b strings.Builder
-	for i, a := range args {
-		if i > 0 {
-			b.WriteByte(' ')
-		}
-		if a == "" || strings.ContainsAny(a, " \t\"'") {
-			fmt.Fprintf(&b, "%q", a)
-		} else {
-			b.WriteString(a)
-		}
-	}
-	return b.String()
 }
 
 func hostUpdate(h *xdrv1.HostInfo) store.HostUpdate {

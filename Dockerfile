@@ -1,5 +1,6 @@
-# Builds the dashboard, the server, and the Linux agent binaries that the
-# server hands out to installers.
+# Builds the dashboard, the server, the optional separate detection service
+# (xdr-detect, same image) and the Linux agent binaries that the server hands
+# out to installers.
 
 FROM node:22-alpine AS web
 WORKDIR /src/web
@@ -15,7 +16,8 @@ RUN go mod download
 COPY . .
 ARG VERSION=dev
 ENV CGO_ENABLED=0
-RUN go build -trimpath -ldflags "-s -w" -o /out/xdr-server ./cmd/xdr-server
+RUN go build -trimpath -ldflags "-s -w" -o /out/xdr-server ./cmd/xdr-server && \
+    go build -trimpath -ldflags "-s -w" -o /out/xdr-detect ./cmd/xdr-detect
 RUN mkdir -p /out/downloads && \
     for arch in amd64 arm64; do \
       GOOS=linux GOARCH=$arch go build -trimpath \
@@ -26,7 +28,7 @@ RUN mkdir -p /out/downloads && \
 
 FROM alpine:3.22
 RUN adduser -D -H -u 10001 xdr && mkdir /data && chown xdr /data
-COPY --from=go /out/xdr-server /usr/local/bin/xdr-server
+COPY --from=go /out/xdr-server /out/xdr-detect /usr/local/bin/
 COPY --from=go /out/downloads /opt/xdr/downloads
 COPY --from=web /src/web/dist /opt/xdr/web
 ENV XDR_DATA_DIR=/data XDR_WEB_DIR=/opt/xdr/web XDR_DOWNLOADS_DIR=/opt/xdr/downloads

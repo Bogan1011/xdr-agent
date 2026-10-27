@@ -5,7 +5,7 @@ the contracts every agent and service follows. Boxes marked *later* are not
 built yet; the boundaries are.
 
 ```
-React console ──HTTPS──▶ xdr-server (Go): API, control plane, fleet
+React console ──HTTPS──▶ xdr-server (Go): API, control plane, fleet, ingest
                                 │
               ┌─────────────────┼──────────────────┐
               ▼                 ▼                  ▼
@@ -121,6 +121,55 @@ IPS, web reputation, device control including read-only USB), tamper
 protection and the self-protection password, PAM, live shell and activity,
 self-update.
 
+## Detection pipeline (0.9)
+
+Every `SendEvents` batch goes through `internal/server/pipeline`:
+
+1. **Normalize**: wire `Event` to the stored row. Tenant, agent and hostname
+   come from the authenticated certificate.
+2. **Enrich**: an in-memory process cache (two generations of 200k processes)
+   keyed by agent and `process_guid` fills the parent of a process and the
+   actor of file and network events when the agent did not send them, and
+   sets `storyline_guid`.
+3. **Store**: insert into ClickHouse. Only a failure here fails the batch.
+4. **Detect**: Sigma, YARA-result and IOC rules raise or count alerts and
+   queue automatic responses (`detect.Service`).
+5. **Correlate**: when three different detections are open in one storyline,
+   one critical `correlation-multi-stage` alert is raised for it.
+
+Detect and correlate run in xdr-server by default. With `XDR_DETECT_URL`
+and `XDR_DETECT_TOKEN` set, xdr-server posts each stored batch to the
+`xdr-detect` service (same image, `docker compose --profile detect`) and
+keeps ingesting if it is slow or down; batches it cannot deliver after five
+tries skip detection and are logged. xdr-server keeps serving detection
+content to agents and refreshing IOC feeds, and tells xdr-detect to reload
+when rules or IOCs change. NATS JetStream replaces the HTTP hop when ingest
+needs to scale.
+
+### Storyline
+
+A storyline is one process tree: everything started by one login, service
+or scheduled job. Its ID is the `process_guid` of the topmost ancestor below
+a session root (systemd, init, sshd, cron, atd, login, container runtimes,
+the agents). So each SSH session or cron job is its own storyline instead of
+one tree under sshd. The console's Storyline view (`/storyline/<agent>/<guid>`,
+API `GET /api/v1/storyline?agent_id=&guid=`) walks `parent_process_guid` up
+to that root and back down, at most 300 processes and 1000 activity events,
+and does not depend on `storyline_guid`, so it works for events stored before
+0.9 too. A process that called execve keeps its GUID; the view shows the
+current image and the earlier ones.
+
+## Real-time commands
+
+Response commands are still stored in Postgres first. An agent that opens
+the live stream sends `LiveHello{commands: true}`; from then on xdr-server
+pushes its commands as `LiveDown.command` the moment they are queued, and
+every 2 s picks up commands queued by another process (xdr-detect). A
+command that cannot be written to the stream goes back to pending. Agents
+without the hello (pre-0.9 Go agents, the Rust agent for now) get commands
+with their heartbeat as before. Results always come back through
+`ReportCommandResult`, and the agent ignores a command ID it already ran.
+
 ## Data model rules
 
 - **tenant_id everywhere.** Postgres: agents, enrollment tokens, deploy jobs,
@@ -149,9 +198,9 @@ self-update.
    policy cache, gRPC/mTLS transport) and `xdr-linux` (collectors and
    response). Ships as an opt-in second binary.
 3. Detection service boundary: normalize, enrich, detect, correlate, runnable
-   inside xdr-server or as its own container.
-4. Process tree model and storyline view keyed by `process_guid`.
-5. Real-time command stream over the existing bidirectional Live stream.
+   inside xdr-server or as its own container (0.9.0).
+4. Process tree model and storyline view keyed by `process_guid` (0.9.0).
+5. Real-time command stream over the existing bidirectional Live stream (0.9.0).
 6. Rust feature migration to parity, then the Rust agent becomes the default.
 
 Not yet: NATS JetStream, Kubernetes, Windows.

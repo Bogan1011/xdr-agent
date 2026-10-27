@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	xdrv1 "github.com/Bogan1011/xdr-agent/gen/xdr/v1"
@@ -24,6 +25,8 @@ const (
 	replayBytes     = 64 << 10
 	activityTimeout = 5 * time.Second
 	outQueue        = 512
+	// dispatchInterval is how often commands queued elsewhere are picked up.
+	dispatchInterval = 2 * time.Second
 )
 
 var (
@@ -31,10 +34,24 @@ var (
 	ErrNotFound = errors.New("no such remote shell")
 )
 
-// Hub tracks the connected agents and the remote shells running on them.
+// CommandStore holds the response commands waiting for delivery.
+type CommandStore interface {
+	// TakeCommands marks an agent's pending commands as sent and returns them.
+	TakeCommands(ctx context.Context, agentID string) ([]*store.Command, error)
+	// RequeueCommand puts a taken command back for the next delivery.
+	RequeueCommand(ctx context.Context, id string) error
+	// PendingCommandAgents lists the agents with commands waiting.
+	PendingCommandAgents(ctx context.Context) ([]string, error)
+}
+
+// Hub tracks the connected agents and the remote shells running on them, and
+// pushes response commands to agents the moment they are queued.
 type Hub struct {
 	DB  *store.Postgres
 	Log *slog.Logger
+	// Commands enables pushing response commands; nil leaves them to the
+	// heartbeat.
+	Commands CommandStore
 
 	mu     sync.Mutex
 	agents map[string]*conn
@@ -48,6 +65,10 @@ type conn struct {
 
 	mu      sync.Mutex
 	pending map[string]chan *xdrv1.Activity
+
+	// commands is set once the agent's hello says it runs pushed commands.
+	commands atomic.Bool
+	pushMu   sync.Mutex
 }
 
 // send queues a message for the agent; it fails when the agent is gone or
@@ -123,6 +144,11 @@ func (h *Hub) handle(c *conn, m *xdrv1.LiveUp) {
 			}
 			h.end(s, reason)
 		}
+	case *xdrv1.LiveUp_Hello:
+		if msg.Hello.Commands && !c.commands.Swap(true) {
+			// Deliver what was queued while the agent was away.
+			go h.push(c)
+		}
 	case *xdrv1.LiveUp_Activity:
 		c.mu.Lock()
 		ch := c.pending[msg.Activity.RequestId]
@@ -136,6 +162,7 @@ func (h *Hub) handle(c *conn, m *xdrv1.LiveUp) {
 
 func (h *Hub) drop(c *conn) {
 	close(c.done)
+	h.requeueUnsent(c)
 	h.mu.Lock()
 	if h.agents[c.agentID] == c {
 		delete(h.agents, c.agentID)
@@ -152,6 +179,28 @@ func (h *Hub) drop(c *conn) {
 	}
 }
 
+// requeueUnsent returns commands that were queued for a stream that ended
+// before they were written, so the heartbeat or the next stream delivers them.
+func (h *Hub) requeueUnsent(c *conn) {
+	if h.Commands == nil {
+		return
+	}
+	for {
+		select {
+		case m := <-c.out:
+			if cmd, ok := m.Msg.(*xdrv1.LiveDown_Command); ok {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				if err := h.Commands.RequeueCommand(ctx, cmd.Command.Id); err != nil {
+					h.Log.Error("requeue command", "command_id", cmd.Command.Id, "err", err)
+				}
+				cancel()
+			}
+		default:
+			return
+		}
+	}
+}
+
 func (h *Hub) conn(agentID string) *conn {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -160,6 +209,83 @@ func (h *Hub) conn(agentID string) *conn {
 
 // Online reports whether the agent has its live stream open.
 func (h *Hub) Online(agentID string) bool { return h.conn(agentID) != nil }
+
+// Notify pushes the agent's pending commands now, if it takes them on the
+// live stream. Otherwise they wait for its next heartbeat.
+func (h *Hub) Notify(agentID string) {
+	if c := h.conn(agentID); c != nil && c.commands.Load() {
+		go h.push(c)
+	}
+}
+
+// RunDispatcher pushes commands queued by other processes, such as a
+// separate detection service, until ctx ends.
+func (h *Hub) RunDispatcher(ctx context.Context) {
+	if h.Commands == nil {
+		return
+	}
+	t := time.NewTicker(dispatchInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		ids, err := h.Commands.PendingCommandAgents(ctx)
+		if err != nil {
+			h.Log.Warn("list pending commands", "err", err)
+			continue
+		}
+		for _, id := range ids {
+			h.Notify(id)
+		}
+	}
+}
+
+// push sends the agent its pending commands. A command that cannot be sent
+// goes back to pending, for the heartbeat or the next push.
+func (h *Hub) push(c *conn) {
+	if h.Commands == nil {
+		return
+	}
+	c.pushMu.Lock()
+	defer c.pushMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmds, err := h.Commands.TakeCommands(ctx, c.agentID)
+	if err != nil {
+		h.Log.Error("take commands", "agent_id", c.agentID, "err", err)
+		return
+	}
+	for _, cmd := range cmds {
+		if c.send(&xdrv1.LiveDown{Msg: &xdrv1.LiveDown_Command{Command: CommandProto(cmd)}}) {
+			h.Log.Info("response command pushed", "command_id", cmd.ID, "type", cmd.Type, "hostname", c.hostname)
+			continue
+		}
+		if err := h.Commands.RequeueCommand(ctx, cmd.ID); err != nil {
+			h.Log.Error("requeue command", "command_id", cmd.ID, "err", err)
+		}
+	}
+}
+
+var commandTypes = map[string]xdrv1.CommandType{
+	"kill_process":     xdrv1.CommandType_COMMAND_TYPE_KILL_PROCESS,
+	"quarantine_file":  xdrv1.CommandType_COMMAND_TYPE_QUARANTINE_FILE,
+	"restore_file":     xdrv1.CommandType_COMMAND_TYPE_RESTORE_FILE,
+	"isolate_host":     xdrv1.CommandType_COMMAND_TYPE_ISOLATE_HOST,
+	"unisolate_host":   xdrv1.CommandType_COMMAND_TYPE_UNISOLATE_HOST,
+	"scan_path":        xdrv1.CommandType_COMMAND_TYPE_SCAN_PATH,
+	"update_agent":     xdrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT,
+	"grant_elevation":  xdrv1.CommandType_COMMAND_TYPE_GRANT_ELEVATION,
+	"revoke_elevation": xdrv1.CommandType_COMMAND_TYPE_REVOKE_ELEVATION,
+	"fim_rebaseline":   xdrv1.CommandType_COMMAND_TYPE_FIM_REBASELINE,
+}
+
+// CommandProto is the wire form of a queued command.
+func CommandProto(c *store.Command) *xdrv1.AgentCommand {
+	return &xdrv1.AgentCommand{Id: c.ID, Type: commandTypes[c.Type], Args: c.Args}
+}
 
 // Activity asks the agent what is happening on the host right now.
 func (h *Hub) Activity(ctx context.Context, agentID string) (*xdrv1.Activity, error) {

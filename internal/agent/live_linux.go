@@ -23,10 +23,12 @@ const maxShells = 8
 var shellUser = regexp.MustCompile(`^[a-z_][a-z0-9_.-]{0,31}$`)
 
 // Live keeps the stream the console uses to reach the agent at once, for
-// remote shells and the live activity view.
+// remote shells, the live activity view and response commands.
 type Live struct {
 	cfg *Config
 	log *slog.Logger
+	// run executes a response command pushed by the console.
+	run func(context.Context, *xdrv1.AgentCommand)
 
 	sendMu sync.Mutex
 	stream xdrv1.AgentService_LiveClient
@@ -38,8 +40,8 @@ type Live struct {
 	sampler activitySampler
 }
 
-func newLive(cfg *Config, log *slog.Logger) *Live {
-	return &Live{cfg: cfg, log: log, shells: map[string]*shell{}}
+func newLive(cfg *Config, log *slog.Logger, run func(context.Context, *xdrv1.AgentCommand)) *Live {
+	return &Live{cfg: cfg, log: log, run: run, shells: map[string]*shell{}}
 }
 
 // Run keeps the stream open, reconnecting with backoff.
@@ -76,6 +78,9 @@ func (l *Live) serve(ctx context.Context, client xdrv1.AgentServiceClient) error
 	l.sendMu.Unlock()
 	// The console forgets its shells when the stream drops, so end them too.
 	defer l.closeAll()
+	// Tell the console it can push response commands here instead of waiting
+	// for the next heartbeat.
+	l.send(&xdrv1.LiveUp{Msg: &xdrv1.LiveUp_Hello{Hello: &xdrv1.LiveHello{Commands: l.run != nil}}})
 	for {
 		m, err := st.Recv()
 		if err != nil {
@@ -98,6 +103,10 @@ func (l *Live) serve(ctx context.Context, client xdrv1.AgentServiceClient) error
 			}
 		case *xdrv1.LiveDown_Activity:
 			go l.activity(msg.Activity.RequestId)
+		case *xdrv1.LiveDown_Command:
+			if l.run != nil {
+				l.run(ctx, msg.Command)
+			}
 		}
 	}
 }

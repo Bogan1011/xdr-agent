@@ -8,6 +8,7 @@ import EndpointDetail from "./pages/EndpointDetail";
 import Events from "./pages/Events";
 import Deploy from "./pages/Deploy";
 import Alerts from "./pages/Alerts";
+import Storyline from "./pages/Storyline";
 import Rules from "./pages/Rules";
 import IOCs from "./pages/IOCs";
 import PAM from "./pages/PAM";
@@ -133,6 +134,7 @@ function Shell({ user, onSignOut }: { user: string; onSignOut: () => void }) {
             <Route path="/events" element={<Events />} />
             <Route path="/deploy" element={<Deploy />} />
             <Route path="/alerts" element={<Alerts />} />
+            <Route path="/storyline/:agentId/:guid" element={<Storyline />} />
             <Route path="/rules" element={<Rules />} />
             <Route path="/iocs" element={<IOCs />} />
             <Route path="/pam" element={<PAM />} />

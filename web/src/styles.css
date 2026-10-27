@@ -302,3 +302,18 @@ pre.code.terminal { white-space: pre-wrap; word-break: normal; overflow-wrap: an
 .terminal-wrap { display: flex; flex-direction: column; gap: 8px; }
 .terminal { height: calc(100vh - 290px); min-height: 360px; background: #05070d; border: 1px solid var(--border); border-radius: 6px; padding: 6px; overflow: hidden; }
 td.wrap { white-space: normal; word-break: break-all; }
+
+/* Storyline: the process tree around an alert or event. */
+.story-tree { display: flex; flex-direction: column; font-size: 13px; }
+.story-row {
+  display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 6px;
+  border-left: 2px solid transparent; min-width: 0;
+}
+.story-row:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.story-row.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.story-row.focus { border-left-color: var(--accent); }
+.story-branch { color: var(--axis); width: 10px; flex: none; }
+.story-name { font-weight: 600; flex: none; }
+.story-args { flex: 1; min-width: 0; }
+.story-session { font-size: 12.5px; padding: 0 8px 6px; }
+.story-alert { margin: 6px 0; }

@@ -23,11 +23,16 @@ import (
 
 const feedInterval = 6 * time.Hour
 
-// Service owns the live detection engine, raises alerts on ingest, queues
-// response commands and refreshes IOC feeds.
+// Service owns the live detection engine, raises and correlates alerts on
+// ingest, queues response commands and refreshes IOC feeds. It is the
+// detect and correlate stages of the pipeline, in xdr-server or xdr-detect.
 type Service struct {
 	DB  *store.Postgres
 	Log *slog.Logger
+	// OnCommand is told about each queued command, to push it to the agent.
+	OnCommand func(agentID string)
+	// OnReload runs after rules or IOCs were reloaded.
+	OnReload func()
 
 	engine  atomic.Pointer[Engine]
 	content atomic.Pointer[Content]
@@ -91,6 +96,9 @@ func (s *Service) Reload(ctx context.Context) error {
 	sig, yr, n := e.Counts()
 	s.Log.Info("detection content loaded", "sigma_rules", sig, "yara_rules", yr, "iocs", n,
 		"blocked_hashes", len(blocked)/32, "content_version", ver)
+	if s.OnReload != nil {
+		s.OnReload()
+	}
 	return nil
 }
 
@@ -115,6 +123,7 @@ func (s *Service) Process(ctx context.Context, events []store.Event) {
 			a := &store.Alert{
 				AgentID: ev.AgentID, Hostname: ev.Hostname, RuleID: m.RuleID, RuleName: m.Name, Kind: m.Kind,
 				Severity: m.Severity, Tags: m.Tags, Detail: m.Detail, Event: raw,
+				ProcessGUID: ev.ProcessGUID, StorylineGUID: ev.StorylineGUID,
 			}
 			id, created, err := s.DB.RaiseAlert(ctx, a, DedupeKey(m, ev))
 			if err != nil {
@@ -128,7 +137,46 @@ func (s *Service) Process(ctx context.Context, events []store.Event) {
 			for _, action := range m.Response {
 				s.autoRespond(ctx, id, action, ev)
 			}
+			s.correlate(ctx, ev, raw)
 		}
+	}
+}
+
+// correlationThreshold is how many different detections in one storyline
+// make it a multi-stage attack.
+const correlationThreshold = 3
+
+// CorrelationRuleID is the rule ID of storyline correlation alerts.
+const CorrelationRuleID = "correlation-multi-stage"
+
+// correlate raises one critical alert when several different detections fire
+// in the same process tree: each alone may be noise, together they are a
+// chain such as download, execute, persist.
+func (s *Service) correlate(ctx context.Context, ev *store.Event, raw []byte) {
+	if ev.StorylineGUID == "" {
+		return
+	}
+	names, err := s.DB.StorylineDetections(ctx, ev.AgentID, ev.StorylineGUID)
+	if err != nil {
+		s.Log.Error("correlate alerts", "storyline", ev.StorylineGUID, "err", err)
+		return
+	}
+	if len(names) < correlationThreshold {
+		return
+	}
+	a := &store.Alert{
+		AgentID: ev.AgentID, Hostname: ev.Hostname, RuleID: CorrelationRuleID,
+		RuleName: "Multi-stage activity in one process tree", Kind: "correlation", Severity: "critical",
+		Detail: fmt.Sprintf("%d detections in one storyline: %s", len(names), strings.Join(names, ", ")),
+		Event:  raw, ProcessGUID: ev.ProcessGUID, StorylineGUID: ev.StorylineGUID,
+	}
+	id, created, err := s.DB.RaiseAlert(ctx, a, ev.StorylineGUID)
+	if err != nil {
+		s.Log.Error("raise correlation alert", "storyline", ev.StorylineGUID, "err", err)
+		return
+	}
+	if created {
+		s.Log.Info("correlation alert raised", "alert_id", id, "hostname", ev.Hostname, "storyline", ev.StorylineGUID, "detections", len(names))
 	}
 }
 
@@ -240,6 +288,9 @@ func (s *Service) QueueCommand(ctx context.Context, c *store.Command) error {
 		return err
 	}
 	s.Log.Info("response command queued", "command_id", c.ID, "agent_id", c.AgentID, "type", c.Type, "by", c.RequestedBy)
+	if s.OnCommand != nil {
+		s.OnCommand(c.AgentID)
+	}
 	return nil
 }
 
