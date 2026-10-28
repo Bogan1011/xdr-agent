@@ -1,4 +1,4 @@
-VERSION ?= 0.10.0
+VERSION ?= 0.10.1
 
 .PHONY: all agent server web proto test up down
 
