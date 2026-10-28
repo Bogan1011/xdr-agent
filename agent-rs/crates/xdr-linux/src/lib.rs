@@ -3,6 +3,7 @@
 //! and fanotify prevention are ported next. Response actions live in
 //! [`response`].
 
+pub mod activity;
 pub mod auth;
 pub mod container;
 pub mod credaccess;
@@ -19,6 +20,7 @@ pub mod process;
 pub mod procfs;
 pub mod resolver;
 pub mod response;
+pub mod shell;
 
 use std::sync::Arc;
 
@@ -30,6 +32,8 @@ pub struct Linux {
     hasher: Arc<procfs::Hasher>,
     resolver: Arc<resolver::Resolver>,
     responder: response::Responder,
+    sampler: std::sync::Mutex<activity::Sampler>,
+    shells: shell::Shells,
 }
 
 impl Linux {
@@ -42,6 +46,8 @@ impl Linux {
                 state_dir: cfg.state_dir.clone(),
                 console: vec![cfg.server.clone(), cfg.enroll_server.clone()],
             },
+            sampler: Default::default(),
+            shells: shell::Shells::new(cfg.disable_remote_shell),
         }
     }
 }
@@ -99,6 +105,31 @@ impl Platform for Linux {
 
     fn isolated(&self) -> bool {
         self.responder.isolated()
+    }
+
+    fn activity(&self) -> pb::Activity {
+        let users = self.shells.users();
+        self.sampler.lock().unwrap().snapshot(&users)
+    }
+
+    fn shell_open(&self, req: pb::ShellOpen, out: tokio::sync::mpsc::Sender<pb::LiveUp>) {
+        self.shells.open(req, out);
+    }
+
+    fn shell_input(&self, id: &str, data: &[u8]) {
+        self.shells.input(id, data);
+    }
+
+    fn shell_resize(&self, id: &str, cols: u32, rows: u32) {
+        self.shells.resize(id, cols, rows);
+    }
+
+    fn shell_close(&self, id: &str) {
+        self.shells.close(id);
+    }
+
+    fn shell_close_all(&self) {
+        self.shells.close_all();
     }
 
     fn restore(&self) {

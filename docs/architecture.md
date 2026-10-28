@@ -140,8 +140,12 @@ uploader. Response actions (kill, quarantine, restore, isolate, unisolate,
 uninstall) live in `xdr-linux/src/response.rs`. The Live stream opens with
 `LiveHello{commands: true}`, so commands arrive at once; commands from Live
 and heartbeats are deduplicated by ID. Commands not ported yet fail at once
-with "not supported by xdr-agent <version> yet", and a remote shell request
-gets a `ShellExit` error.
+with "not supported by xdr-agent <version> yet". Since 0.10.3 the Live
+stream also carries remote shells (`xdr-linux/src/shell.rs`: `su -l` on a
+new pty, at most 8, hung up when the stream drops, `disable_remote_shell`
+in agent.yaml refuses them) and the live view (`xdr-linux/src/activity.rs`).
+Every process in a console shell has `XDR_CONSOLE_SESSION=<session id>`,
+kept through `su -l` with `-w`.
 
 Build: `make agent` (Docker, static musl binary in `bin/xdr-agent`) or
 `cd agent-rs && cargo build --release`. The console image builds the amd64
@@ -173,7 +177,7 @@ not reach the console within 3 minutes or 3 starts), eBPF CO-RE collectors
 prevention modules (fanotify exec/script blocking, application control, FIM,
 firewall, IPS, web reputation, device control including read-only USB),
 tamper protection and the self-protection password, PAM, live shell and
-activity, bash command telemetry (uprobes on readline and parse_and_execute,
+activity (done in 0.10.3), bash command telemetry (uprobes on readline and parse_and_execute,
 emitting ShellCommandEvent).
 
 ## Detection pipeline (0.9)

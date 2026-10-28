@@ -45,4 +45,12 @@ pub trait Platform: Send + Sync + 'static {
     fn isolated(&self) -> bool;
     /// Re-applies enforcement that must survive a restart, such as isolation.
     fn restore(&self);
+    /// The console's live view of the host. Blocks briefly.
+    fn activity(&self) -> pb::Activity;
+    /// Starts a remote shell; its output and end go to `out`. Blocks briefly.
+    fn shell_open(&self, req: pb::ShellOpen, out: tokio::sync::mpsc::Sender<pb::LiveUp>);
+    fn shell_input(&self, id: &str, data: &[u8]);
+    fn shell_resize(&self, id: &str, cols: u32, rows: u32);
+    fn shell_close(&self, id: &str);
+    fn shell_close_all(&self);
 }

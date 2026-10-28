@@ -1803,7 +1803,7 @@ dependencies = [
 
 [[package]]
 name = "xdr-agent"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "tokio",
@@ -1815,7 +1815,7 @@ dependencies = [
 
 [[package]]
 name = "xdr-core"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "hex",
@@ -1837,7 +1837,7 @@ dependencies = [
 
 [[package]]
 name = "xdr-linux"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "hex",
@@ -1858,7 +1858,7 @@ dependencies = [
 
 [[package]]
 name = "xdr-proto"
-version = "0.10.1"
+version = "0.10.3"
 dependencies = [
  "prost",
  "tonic",
