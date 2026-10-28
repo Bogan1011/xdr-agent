@@ -19,6 +19,7 @@ tokio-stream.workspace = true
 tonic.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+boreal = { version = "1.4", default-features = false }
 xdr-proto.workspace = true
 
 [dev-dependencies]

@@ -177,12 +177,26 @@ collector is not started and /proc/net polling reports only UDP and
 listeners. Without kernel BTF, or when a hook group cannot attach, the old
 collector stays for that source; `ebpf: off` in agent.yaml turns it off.
 
+Since 0.10.5 the agent scans with YARA (`xdr-core/src/scanner.rs`, boreal,
+a pure Rust engine, so the binary stays static). The heartbeat reports the
+loaded content version; when the console's differs the agent downloads the
+detection content, compiles it and caches it in the queue database, so rules
+survive a restart without the console. A rule set that does not compile is
+rejected and the old one stays. With the policy's anti-malware module on,
+new and changed files and the binaries of new processes are queued for a
+background scan (dropped when the queue is full, files over
+`scan_max_bytes`, default 32 MiB, and the state directory skipped), and a
+match is reported as a `YaraMatch` event; with auto-quarantine on the file is
+quarantined first and the event says so. **Scan path** scans a file or tree
+on request and returns how many files matched.
+
 Porting order to parity: response actions and Live commands (done in
 0.10.0), self-update (done in 0.10.1, `xdr-core/src/update.rs`: chunked
 download over mTLS, SHA-256 and `-version` check, atomic swap, exit so
 systemd restarts it, rollback to the previous binary when the new one does
 not reach the console within 3 minutes or 3 starts), eBPF CO-RE collectors
-(done in 0.10.4, see below), YARA scanning and detection content,
+(done in 0.10.4, see below), YARA scanning and detection content (done in
+0.10.5),
 prevention modules (fanotify exec/script blocking, application control, FIM,
 firewall, IPS, web reputation, device control including read-only USB),
 tamper protection and the self-protection password, PAM, live shell and
