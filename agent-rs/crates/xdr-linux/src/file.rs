@@ -1,6 +1,6 @@
-//! File telemetry from inotify over the configured directory trees, like the
-//! Go agent's inotify collector. It does not know the writing process; the
-//! eBPF file collector (ported later) adds that.
+//! File telemetry from inotify over the configured directory trees. It does
+//! not know the writing process; the eBPF file collector, used instead when
+//! the kernel supports it, does.
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -131,30 +131,68 @@ impl Collector for File {
 
 impl File {
     fn emit_file(&self, sink: &EventSink, t: EventType, path: &Path, old: Option<&Path>) {
-        let mut fe = pb::FileEvent {
-            path: path.to_string_lossy().into_owned(),
-            old_path: old.map(|o| o.to_string_lossy().into_owned()).unwrap_or_default(),
-            ..Default::default()
-        };
-        if let Ok(md) = std::fs::symlink_metadata(path) {
-            fe.size = md.size();
-            fe.mode = md.mode();
-            fe.uid = md.uid();
-            fe.gid = md.gid();
-            fe.inode = md.ino();
-            fe.device = md.dev();
-            fe.owner = procfs::username(md.uid());
-            if md.is_file() && matches!(t, EventType::FileModify | EventType::FileRename | EventType::FileCreate) {
-                let h = self.hasher.hashes(&fe.path);
-                (fe.sha256, fe.sha1, fe.md5) = (h.sha256, h.sha1, h.md5);
-            }
+        emit_file(sink, &self.hasher, t, path, old, None);
+    }
+}
+
+/// The process behind a file change, when the source knows it (eBPF).
+pub(crate) struct Actor {
+    pub pid: u32,
+    pub ppid: u32,
+    pub uid: u32,
+    pub comm: String,
+}
+
+pub(crate) fn emit_file(
+    sink: &EventSink,
+    hasher: &Hasher,
+    t: EventType,
+    path: &Path,
+    old: Option<&Path>,
+    actor: Option<&Actor>,
+) {
+    let mut fe = pb::FileEvent {
+        path: path.to_string_lossy().into_owned(),
+        old_path: old.map(|o| o.to_string_lossy().into_owned()).unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(a) = actor {
+        fe.pid = a.pid;
+        fe.ppid = a.ppid;
+        fe.exe = process_exe(a.pid, &a.comm);
+        fe.user = procfs::username(a.uid);
+        fe.uid = a.uid;
+    }
+    if t != EventType::FileDelete
+        && let Ok(md) = std::fs::symlink_metadata(path)
+    {
+        fe.size = md.size();
+        fe.mode = md.mode();
+        fe.uid = md.uid();
+        fe.gid = md.gid();
+        fe.inode = md.ino();
+        fe.device = md.dev();
+        fe.owner = procfs::username(md.uid());
+        if md.is_file() && matches!(t, EventType::FileModify | EventType::FileRename | EventType::FileCreate) {
+            let h = hasher.hashes(&fe.path);
+            (fe.sha256, fe.sha1, fe.md5) = (h.sha256, h.sha1, h.md5);
         }
-        if let Some(m) = procfs::mount_of(&fe.path) {
-            (fe.mount_point, fe.filesystem) = (m.point, m.fstype);
-        }
-        let mut e = new_event(t);
-        e.payload = Some(pb::event::Payload::File(fe));
-        sink.emit(e);
+    }
+    if let Some(m) = procfs::mount_of(&fe.path) {
+        (fe.mount_point, fe.filesystem) = (m.point, m.fstype);
+    }
+    let mut e = new_event(t);
+    e.payload = Some(pb::event::Payload::File(fe));
+    sink.emit(e);
+}
+
+/// Names the process behind an event. One that already exited is named by
+/// its command name in brackets.
+pub(crate) fn process_exe(pid: u32, comm: &str) -> String {
+    match std::fs::read_link(format!("/proc/{pid}/exe")) {
+        Ok(p) => p.to_string_lossy().trim_end_matches(" (deleted)").to_string(),
+        Err(_) if comm.is_empty() => String::new(),
+        Err(_) => format!("[{comm}]"),
     }
 }
 

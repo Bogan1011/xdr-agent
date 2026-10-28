@@ -26,6 +26,8 @@ pub struct Config {
     pub log_level: String,
     /// Refuses remote shells from the console on this host.
     pub disable_remote_shell: bool,
+    /// "off" keeps the inotify and /proc collectors even where eBPF works.
+    pub ebpf: String,
 }
 
 impl Default for Config {
@@ -64,6 +66,7 @@ impl Default for Config {
             batch_size: 500,
             log_level: "info".into(),
             disable_remote_shell: false,
+            ebpf: String::new(),
         }
     }
 }
