@@ -58,7 +58,8 @@ impl<P: Platform> Heartbeat<P> {
                 stats: Some(self.stats()),
                 isolated: self.platform.isolated(),
                 content_version: self.commands.scanner.version(),
-                ..Default::default()
+                tamper_protected: self.platform.tamper_protected(),
+                prevention: self.platform.prevention_state(),
             });
             req.set_timeout(Duration::from_secs(10));
             let resp = match self.client.heartbeat(req).await {
@@ -77,6 +78,8 @@ impl<P: Platform> Heartbeat<P> {
                     last_version = Some(p.version);
                 }
                 let _ = self.queue.put(POLICY_KEY, &p.encode_to_vec());
+                // Only hands the policy over; modules apply it on their threads.
+                self.platform.set_policy(p);
             }
             self.commands
                 .scanner
@@ -86,6 +89,7 @@ impl<P: Platform> Heartbeat<P> {
             }
             if let Some(t) = &resp.tamper {
                 let _ = self.queue.put(TAMPER_KEY, &t.encode_to_vec());
+                self.platform.set_tamper(t);
             }
             for c in resp.commands {
                 self.commands.dispatch(c);
@@ -109,6 +113,7 @@ impl<P: Platform> Heartbeat<P> {
         match self.commands.scanner.update(&c.version, &c.yara_rules) {
             Ok(()) => {
                 let _ = self.queue.put(CONTENT_KEY, &c.encode_to_vec());
+                self.platform.set_content(&c);
             }
             Err(err) => tracing::error!(version = %c.version, "detection content rejected: {err:#}"),
         }

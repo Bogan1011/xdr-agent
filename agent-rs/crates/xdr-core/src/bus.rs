@@ -111,6 +111,7 @@ impl Bus {
         resolver: Arc<dyn ProcessResolver>,
         queue: Arc<Queue>,
         uploaded: Arc<Notify>,
+        upload: Arc<dyn Fn(EventType) -> bool + Send + Sync>,
     ) {
         let mut rx = self.rx.take().expect("bus runs once");
         let mut batch: Vec<pb::Event> = Vec::with_capacity(256);
@@ -129,12 +130,19 @@ impl Bus {
             let res = resolver.clone();
             let id = agent_id.clone();
             let mut events = std::mem::take(&mut batch);
+            let upload = upload.clone();
             // Resolving reads /proc and hashes files: keep it off the reactor.
             let encoded = tokio::task::spawn_blocking(move || {
                 for e in &mut events {
                     envelope(e, &id, res.as_ref());
                 }
-                let enc: Vec<(i32, Vec<u8>)> = events.iter().map(|e| (e.priority, e.encode_to_vec())).collect();
+                // Local consumers see everything; the console gets what
+                // activity monitoring sends.
+                let enc: Vec<(i32, Vec<u8>)> = events
+                    .iter()
+                    .filter(|e| upload(e.r#type()))
+                    .map(|e| (e.priority, e.encode_to_vec()))
+                    .collect();
                 (events, enc)
             })
             .await;

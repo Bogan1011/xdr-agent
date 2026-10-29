@@ -53,4 +53,31 @@ pub trait Platform: Send + Sync + 'static {
     fn shell_resize(&self, id: &str, cols: u32, rows: u32);
     fn shell_close(&self, id: &str);
     fn shell_close_all(&self);
+
+    // Prevention. The defaults enforce nothing, for platforms without it.
+
+    /// Starts the prevention modules; their events go to sink.
+    fn start_prevention(&self, _sink: EventSink) {}
+    fn set_policy(&self, _p: &pb::PreventionPolicy) {}
+    /// Hash, IP and domain IOCs from the detection content.
+    fn set_content(&self, _c: &pb::DetectionContent) {}
+    fn set_tamper(&self, _t: &pb::TamperPolicy) {}
+    fn prevention_state(&self) -> Option<pb::PreventionState> {
+        None
+    }
+    fn tamper_protected(&self) -> bool {
+        false
+    }
+    /// Sees every normalized event, for prevention that reacts to telemetry.
+    fn observe(&self, _e: &pb::Event) {}
+    /// Whether activity monitoring sends this event type to the console.
+    fn telemetry(&self, _t: pb::EventType) -> bool {
+        true
+    }
+    /// Whether SIGTERM may stop the agent. May block for a few seconds.
+    fn stop_allowed(&self) -> bool {
+        true
+    }
+    /// Called on a clean shutdown.
+    fn stopping(&self) {}
 }

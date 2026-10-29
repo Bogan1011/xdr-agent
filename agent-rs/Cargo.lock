@@ -1957,7 +1957,7 @@ dependencies = [
 
 [[package]]
 name = "xdr-agent"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "anyhow",
  "tokio",
@@ -1969,7 +1969,7 @@ dependencies = [
 
 [[package]]
 name = "xdr-core"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "anyhow",
  "boreal",
@@ -1992,7 +1992,7 @@ dependencies = [
 
 [[package]]
 name = "xdr-linux"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "anyhow",
  "aya",
@@ -2014,7 +2014,7 @@ dependencies = [
 
 [[package]]
 name = "xdr-proto"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "prost",
  "tonic",
