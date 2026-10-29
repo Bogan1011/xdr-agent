@@ -30,6 +30,9 @@ pub struct Config {
     pub ebpf: String,
     /// Largest file the YARA scanner reads.
     pub scan_max_bytes: u64,
+    /// The agent restarts itself when its resident memory stays above this
+    /// for a minute (a leak or runaway buffer); 0 turns the check off.
+    pub max_memory_bytes: u64,
     /// The file this was loaded from.
     #[serde(skip)]
     pub config_path: PathBuf,
@@ -73,6 +76,7 @@ impl Default for Config {
             disable_remote_shell: false,
             ebpf: String::new(),
             scan_max_bytes: 32 << 20,
+            max_memory_bytes: 1 << 30,
             config_path: PathBuf::new(),
         }
     }

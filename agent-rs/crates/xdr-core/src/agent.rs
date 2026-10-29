@@ -49,7 +49,11 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
             use tokio::sync::broadcast::error::RecvError;
             loop {
                 match prevention.blocking_recv() {
-                    Ok(e) => observer.observe(&e),
+                    Ok(e) => {
+                        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer.observe(&e))).is_err() {
+                            tracing::error!(event = e.id, "prevention panicked on an event, skipped it");
+                        }
+                    }
                     Err(RecvError::Lagged(n)) => tracing::debug!(skipped = n, "prevention lagged behind the bus"),
                     Err(RecvError::Closed) => break,
                 }
@@ -103,7 +107,7 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
     );
     let mut local = bus.subscribe();
     let observer = scanner.clone();
-    tokio::spawn(async move {
+    supervise("scanner-observer", async move {
         use tokio::sync::broadcast::error::RecvError;
         loop {
             match local.recv().await {
@@ -113,7 +117,7 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
             }
         }
     });
-    tokio::spawn(scan_queue.run(scanner.clone()));
+    supervise("yara-scan-queue", scan_queue.run(scanner.clone()));
     let commands = Arc::new(Commands::new(
         client.clone(),
         platform.clone(),
@@ -131,14 +135,18 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
         spawn_collector(c, sink);
     }
     let filter = platform.clone();
-    tokio::spawn(bus.run(
-        id.agent_id.clone(),
-        platform.resolver(),
-        queue.clone(),
-        wake.clone(),
-        Arc::new(move |t| filter.telemetry(t)),
-    ));
-    tokio::spawn(
+    supervise(
+        "bus",
+        bus.run(
+            id.agent_id.clone(),
+            platform.resolver(),
+            queue.clone(),
+            wake.clone(),
+            Arc::new(move |t| filter.telemetry(t)),
+        ),
+    );
+    supervise(
+        "uploader",
         Uploader {
             client: client.clone(),
             queue: queue.clone(),
@@ -148,7 +156,8 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
         }
         .run(),
     );
-    tokio::spawn(
+    supervise(
+        "heartbeat",
         Heartbeat {
             client,
             platform: platform.clone(),
@@ -161,13 +170,17 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
         }
         .run(),
     );
-    tokio::spawn(
+    supervise(
+        "live",
         Live {
             client: transport::live_client(&cfg, &id)?,
             commands,
         }
         .run(),
     );
+    if cfg.max_memory_bytes > 0 {
+        tokio::spawn(memory_watchdog(platform.clone(), cfg.max_memory_bytes));
+    }
 
     tokio::select! {
         _ = shutdown_signal(platform.clone()) => {
@@ -181,16 +194,67 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
     Ok(())
 }
 
-/// Runs a blocking collector on its own thread and restarts it when it fails,
-/// so one broken source does not take the agent down.
+/// Exit code when a core task died: systemd restarts the agent, which is
+/// better than running on without uploads, heartbeats or the live stream.
+const EXIT_CORE_TASK: i32 = 70;
+/// Exit code when the memory watchdog fired.
+const EXIT_MEMORY: i32 = 71;
+
+/// Runs a task the agent cannot work without. These loop forever, so if one
+/// ever ends, by a panic or a bug, the agent exits for systemd to restart it.
+fn supervise<F>(name: &'static str, task: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    let handle = tokio::spawn(task);
+    tokio::spawn(async move {
+        match handle.await {
+            Err(err) if err.is_panic() => tracing::error!(task = name, "core task panicked, restarting the agent"),
+            _ => tracing::error!(task = name, "core task ended, restarting the agent"),
+        }
+        std::process::exit(EXIT_CORE_TASK);
+    });
+}
+
+/// Restarts the agent when its resident memory stays above max for
+/// LIMIT_CHECKS samples in a row. Child processes such as remote shells are
+/// not counted.
+async fn memory_watchdog<P: Platform>(platform: Arc<P>, max: u64) {
+    const EVERY: Duration = Duration::from_secs(20);
+    const LIMIT_CHECKS: u32 = 3;
+    let mut over = 0;
+    loop {
+        tokio::time::sleep(EVERY).await;
+        let rss = platform.usage().rss_bytes;
+        over = if rss > max { over + 1 } else { 0 };
+        if over == 1 {
+            tracing::warn!(rss_mb = rss >> 20, max_mb = max >> 20, "agent memory above its limit");
+        }
+        if over >= LIMIT_CHECKS {
+            tracing::error!(
+                rss_mb = rss >> 20,
+                max_mb = max >> 20,
+                "agent memory stayed above its limit, restarting"
+            );
+            std::process::exit(EXIT_MEMORY);
+        }
+    }
+}
+
+/// Runs a blocking collector on its own thread and restarts it when it fails
+/// or panics, so one broken source does not take the agent down.
 fn spawn_collector(mut c: Box<dyn Collector>, sink: EventSink) {
     std::thread::Builder::new()
         .name(format!("collector-{}", c.name()))
         .spawn(move || {
             loop {
                 tracing::info!(collector = c.name(), "collector starting");
-                if let Err(err) = c.run(&sink) {
-                    tracing::error!(collector = c.name(), "collector stopped, restarting in 10s: {err:#}");
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.run(&sink))) {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => {
+                        tracing::error!(collector = c.name(), "collector stopped, restarting in 10s: {err:#}")
+                    }
+                    Err(_) => tracing::error!(collector = c.name(), "collector panicked, restarting in 10s"),
                 }
                 std::thread::sleep(Duration::from_secs(10));
             }

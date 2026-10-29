@@ -22,7 +22,9 @@ pub mod process;
 pub mod procfs;
 pub mod resolver;
 pub mod response;
+pub mod service;
 pub mod shell;
+pub mod writers;
 
 use std::sync::Arc;
 
@@ -86,14 +88,16 @@ impl Platform for Linux {
             Some(p) => (p.files.take(), p.net.take()),
             None => (None, None),
         };
-        let file: Box<dyn Collector> = match files_ebpf {
-            Some(ring) => Box::new(ebpf::EbpfFile {
+        let writers = files_ebpf.is_some().then(|| Arc::new(writers::Writers::default()));
+        let file: Box<dyn Collector> = match (files_ebpf, &writers) {
+            (Some(ring), Some(w)) => Box::new(ebpf::EbpfFile {
                 ring: Some(ring),
                 paths: cfg.file_paths.clone(),
                 exclude: cfg.file_exclude.clone(),
                 hasher: self.hasher.clone(),
+                writers: w.clone(),
             }),
-            None => Box::new(file::File {
+            _ => Box::new(file::File {
                 paths: cfg.file_paths.clone(),
                 exclude: cfg.file_exclude.clone(),
                 max_watches: cfg.max_file_watches,
@@ -130,6 +134,7 @@ impl Platform for Linux {
             }),
             Box::new(persistence::Persistence {
                 hasher: self.hasher.clone(),
+                writers,
             }),
         ];
         out.extend(rest);
@@ -145,6 +150,7 @@ impl Platform for Linux {
             pb::CommandType::FimRebaseline => self.prevention.fim.rebaseline(),
             pb::CommandType::Uninstall => {
                 self.prevention.tamper.release();
+                self.prevention.dev.release_all();
                 self.responder.respond(c)
             }
             _ => self.responder.respond(c),
@@ -182,6 +188,7 @@ impl Platform for Linux {
 
     fn restore(&self) {
         migrate::cleanup_go_agent();
+        service::ensure_hardening();
         self.responder.restore_isolation();
     }
 

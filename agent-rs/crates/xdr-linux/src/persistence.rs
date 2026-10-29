@@ -3,7 +3,8 @@
 //! profiles, the dynamic loader, udev, kernel module and sysctl configs,
 //! sudoers and the account files). Watched with inotify; each event says
 //! which kind of persistence changed and, for text files, which lines were
-//! added and removed.
+//! added and removed. Where the eBPF file hooks run, the process that made
+//! the change comes from them.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -18,6 +19,7 @@ use xdr_core::pb::{self, EventType};
 use xdr_core::platform::Collector;
 
 use crate::procfs::{self, Hasher};
+use crate::writers::{Writer, Writers};
 
 /// Files larger than this are hashed but not diffed.
 const MAX_DIFF_FILE: u64 = 256 << 10;
@@ -147,6 +149,8 @@ struct Known {
 
 pub struct Persistence {
     pub hasher: Arc<Hasher>,
+    /// Filled by the eBPF file collector; None without eBPF.
+    pub writers: Option<Arc<Writers>>,
 }
 
 struct State {
@@ -154,6 +158,7 @@ struct State {
     watches: HashMap<WatchDescriptor, PathBuf>,
     known: HashMap<String, Known>,
     hasher: Arc<Hasher>,
+    writers: Option<Arc<Writers>>,
 }
 
 fn dir_mask() -> WatchMask {
@@ -177,6 +182,7 @@ impl Collector for Persistence {
             watches: HashMap::new(),
             known: HashMap::new(),
             hasher: self.hasher.clone(),
+            writers: self.writers.clone(),
         };
         // /etc itself for its top-level files, then every persistence directory.
         st.watch(Path::new("/etc"), false);
@@ -283,7 +289,8 @@ impl State {
         for p in fresh {
             if let Some(k) = self.known.get(&p) {
                 let lines = k.lines.as_ref().map(|l| diff(&[], l).1).unwrap_or_default();
-                emit(sink, &p, "created", &k.sha256, "", String::new(), lines);
+                // Written before the watch: no writer is waited for.
+                emit(sink, &p, "created", &k.sha256, "", String::new(), lines, None);
             }
         }
     }
@@ -324,11 +331,29 @@ impl State {
                         format!("{note}\n{added}")
                     };
                 }
-                emit(sink, path, "modified", &now.sha256, &o.sha256, removed, added);
+                emit(
+                    sink,
+                    path,
+                    "modified",
+                    &now.sha256,
+                    &o.sha256,
+                    removed,
+                    added,
+                    self.writer(path),
+                );
             }
             None => {
                 let added = now.lines.as_ref().map(|l| diff(&[], l).1).unwrap_or_default();
-                emit(sink, path, "created", &now.sha256, "", String::new(), added);
+                emit(
+                    sink,
+                    path,
+                    "created",
+                    &now.sha256,
+                    "",
+                    String::new(),
+                    added,
+                    self.writer(path),
+                );
             }
         }
         self.known.insert(path.to_string(), now);
@@ -339,15 +364,44 @@ impl State {
         let (sha, removed) = old
             .map(|o| (o.sha256, o.lines.map(|l| diff(&l, &[]).0).unwrap_or_default()))
             .unwrap_or_default();
-        emit(sink, path, "deleted", "", &sha, removed, String::new());
+        emit(
+            sink,
+            path,
+            "deleted",
+            "",
+            &sha,
+            removed,
+            String::new(),
+            self.writer(path),
+        );
+    }
+
+    fn writer(&self, path: &str) -> Option<Writer> {
+        self.writers.as_ref()?.lookup(path)
     }
 }
 
-fn emit(sink: &EventSink, path: &str, op: &str, sha: &str, old_sha: &str, removed: String, added: String) {
+#[allow(clippy::too_many_arguments)]
+fn emit(
+    sink: &EventSink,
+    path: &str,
+    op: &str,
+    sha: &str,
+    old_sha: &str,
+    removed: String,
+    added: String,
+    writer: Option<Writer>,
+) {
     let Some(kind) = classify(path) else { return };
-    let (uid, user) = std::fs::metadata(path)
-        .map(|m| (m.uid(), procfs::username(m.uid())))
-        .unwrap_or_default();
+    // Without the writer, the file's owner stands in.
+    let (pid, exe, uid) = match writer {
+        Some(w) => (w.pid, w.exe, w.uid),
+        None => (
+            0,
+            String::new(),
+            std::fs::metadata(path).map(|m| m.uid()).unwrap_or_default(),
+        ),
+    };
     let mut e = new_event(EventType::Persistence);
     e.payload = Some(pb::event::Payload::Persistence(pb::PersistenceEvent {
         persistence_type: kind.into(),
@@ -357,10 +411,10 @@ fn emit(sink: &EventSink, path: &str, op: &str, sha: &str, old_sha: &str, remove
         old_sha256: old_sha.into(),
         old_value: removed,
         new_value: added,
-        // inotify does not know the writer; the file's owner stands in.
+        pid,
+        exe,
         uid,
-        user,
-        ..Default::default()
+        user: procfs::username(uid),
     }));
     sink.emit(e);
 }
@@ -455,7 +509,7 @@ mod live {
     fn live_persistence() {
         let (sink, mut rx) = EventSink::channel(64);
         let hasher = Arc::new(Hasher::new(100));
-        std::thread::spawn(move || Persistence { hasher }.run(&sink));
+        std::thread::spawn(move || Persistence { hasher, writers: None }.run(&sink));
         std::thread::sleep(Duration::from_secs(2));
         let path = "/etc/cron.d/xdr-live-test";
         std::fs::write(path, "* * * * * root /bin/true\n").unwrap();

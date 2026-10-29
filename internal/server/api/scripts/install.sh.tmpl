@@ -88,14 +88,18 @@ cat > /etc/systemd/system/xdr-agent.service <<'EOF'
 Description=XDR endpoint agent
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/xdr-agent --config /etc/xdr-agent/agent.yaml
 Restart=always
 RestartSec=5
+TimeoutStopSec=30
 LimitNOFILE=65536
 Nice=5
+CPUWeight=50
+IOWeight=50
 OOMScoreAdjust=-500
 
 [Install]
@@ -107,4 +111,12 @@ rm -f /var/lib/xdr-agent/maintenance.json
 
 systemctl daemon-reload
 systemctl enable --now xdr-agent
-echo "==> xdr-agent installed and started. Logs: journalctl -u xdr-agent -f"
+
+# Fail the install (and a remote install from the console) when the agent
+# does not stay up, with its log, instead of reporting success.
+sleep 5
+if ! systemctl is-active --quiet xdr-agent; then
+  journalctl -u xdr-agent -n 30 --no-pager >&2 || true
+  die "the agent did not stay running; see the log above"
+fi
+echo "==> xdr-agent installed and running. Logs: journalctl -u xdr-agent -f"
