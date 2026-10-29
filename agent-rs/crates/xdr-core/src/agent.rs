@@ -15,9 +15,10 @@ use crate::heartbeat::{self, Heartbeat};
 use crate::live::Live;
 use crate::platform::{Collector, Platform};
 use crate::queue::Queue;
+use crate::scanner::Scanner;
 use crate::update::Updater;
 use crate::uploader::Uploader;
-use crate::{identity, transport};
+use crate::{identity, pb, transport};
 
 pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
     let started = Instant::now();
@@ -45,15 +46,59 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
     let client = transport::agent_client(&cfg, &id)?;
     let hb_wake = Arc::new(Notify::new());
     let restart = Arc::new(Notify::new());
+    let bus = Bus::new(20_000);
+    let quarantine = platform.clone();
+    let (scanner, scan_queue) = Scanner::new(
+        bus.sink().named("yara"),
+        cfg.scan_max_bytes,
+        vec![cfg.state_dir.to_string_lossy().into_owned()],
+        Box::new(move |path| {
+            let c = pb::AgentCommand {
+                r#type: pb::CommandType::QuarantineFile as i32,
+                args: [("path".to_string(), path.to_string())].into(),
+                ..Default::default()
+            };
+            match quarantine.respond(&c) {
+                Ok(_) => Some("quarantined".into()),
+                Err(err) => {
+                    tracing::warn!(path, "auto-quarantine failed: {err:#}");
+                    None
+                }
+            }
+        }),
+    );
+    if let Some(c) = heartbeat::cached_content(&queue)
+        && let Err(err) = scanner.update(&c.version, &c.yara_rules)
+    {
+        tracing::warn!("cached detection content rejected: {err:#}");
+    }
+    scanner.set_policy(
+        heartbeat::cached_policy(&queue)
+            .as_ref()
+            .and_then(|p| p.anti_malware.as_ref()),
+    );
+    let mut local = bus.subscribe();
+    let observer = scanner.clone();
+    tokio::spawn(async move {
+        use tokio::sync::broadcast::error::RecvError;
+        loop {
+            match local.recv().await {
+                Ok(e) => observer.observe(&e),
+                Err(RecvError::Lagged(n)) => tracing::debug!(skipped = n, "scanner lagged behind the bus"),
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+    tokio::spawn(scan_queue.run(scanner.clone()));
     let commands = Arc::new(Commands::new(
         client.clone(),
         platform.clone(),
         hb_wake.clone(),
         updater,
         restart.clone(),
+        scanner,
     ));
 
-    let bus = Bus::new(20_000);
     let wake = Arc::new(Notify::new());
     let sent = Arc::new(AtomicU64::new(0));
     let bus_dropped = bus.dropped();

@@ -18,6 +18,7 @@ use crate::queue::Queue;
 pub const INTERVAL: Duration = Duration::from_secs(15);
 const POLICY_KEY: &str = "policy.prevention";
 const TAMPER_KEY: &str = "policy.tamper";
+const CONTENT_KEY: &str = "content.detection";
 
 pub struct Heartbeat<P: Platform> {
     pub client: AgentServiceClient<Channel>,
@@ -37,6 +38,12 @@ pub fn cached_policy(q: &Queue) -> Option<pb::PreventionPolicy> {
     pb::PreventionPolicy::decode(raw.as_slice()).ok()
 }
 
+/// The last detection content downloaded from the console, if any.
+pub fn cached_content(q: &Queue) -> Option<pb::DetectionContent> {
+    let raw = q.get(CONTENT_KEY).ok()??;
+    pb::DetectionContent::decode(raw.as_slice()).ok()
+}
+
 impl<P: Platform> Heartbeat<P> {
     pub async fn run(mut self) {
         let mut tick = tokio::time::interval(INTERVAL);
@@ -50,6 +57,7 @@ impl<P: Platform> Heartbeat<P> {
                 host: Some(self.platform.host_info()),
                 stats: Some(self.stats()),
                 isolated: self.platform.isolated(),
+                content_version: self.commands.scanner.version(),
                 ..Default::default()
             });
             req.set_timeout(Duration::from_secs(10));
@@ -70,12 +78,39 @@ impl<P: Platform> Heartbeat<P> {
                 }
                 let _ = self.queue.put(POLICY_KEY, &p.encode_to_vec());
             }
+            self.commands
+                .scanner
+                .set_policy(resp.prevention.as_ref().and_then(|p| p.anti_malware.as_ref()));
+            if resp.content_version != self.commands.scanner.version() {
+                self.fetch_content().await;
+            }
             if let Some(t) = &resp.tamper {
                 let _ = self.queue.put(TAMPER_KEY, &t.encode_to_vec());
             }
             for c in resp.commands {
                 self.commands.dispatch(c);
             }
+        }
+    }
+
+    /// Downloads, compiles and caches the console's detection content. A
+    /// failed download or compile keeps the current rules; the next heartbeat
+    /// tries again.
+    async fn fetch_content(&mut self) {
+        let mut req = tonic::Request::new(pb::DetectionContentRequest {});
+        req.set_timeout(Duration::from_secs(60));
+        let c = match self.client.get_detection_content(req).await {
+            Ok(r) => r.into_inner(),
+            Err(status) => {
+                tracing::warn!(code = ?status.code(), msg = status.message(), "detection content download failed");
+                return;
+            }
+        };
+        match self.commands.scanner.update(&c.version, &c.yara_rules) {
+            Ok(()) => {
+                let _ = self.queue.put(CONTENT_KEY, &c.encode_to_vec());
+            }
+            Err(err) => tracing::error!(version = %c.version, "detection content rejected: {err:#}"),
         }
     }
 

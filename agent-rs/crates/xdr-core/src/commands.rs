@@ -10,6 +10,7 @@ use tonic::transport::Channel;
 
 use crate::pb::{self, CommandType, agent_service_client::AgentServiceClient};
 use crate::platform::Platform;
+use crate::scanner::Scanner;
 use crate::update::Updater;
 
 /// How many command IDs are remembered, so a command delivered on both the
@@ -24,6 +25,7 @@ pub struct Commands<P: Platform> {
     pub updater: Arc<Updater>,
     /// Ends the agent so systemd starts the updated binary.
     pub restart: Arc<Notify>,
+    pub scanner: Arc<Scanner>,
     seen: Mutex<Recent>,
 }
 
@@ -34,6 +36,7 @@ impl<P: Platform> Commands<P> {
         heartbeat: Arc<Notify>,
         updater: Arc<Updater>,
         restart: Arc<Notify>,
+        scanner: Arc<Scanner>,
     ) -> Self {
         Commands {
             client,
@@ -41,6 +44,7 @@ impl<P: Platform> Commands<P> {
             heartbeat,
             updater,
             restart,
+            scanner,
             seen: Mutex::new(Recent::default()),
         }
     }
@@ -64,6 +68,18 @@ impl<P: Platform> Commands<P> {
             self.updater
                 .update(&self.client, &arch, arg("version"), arg("sha256"))
                 .await
+        } else if ty == CommandType::ScanPath {
+            let (s, path) = (self.scanner.clone(), c.args.get("path").cloned().unwrap_or_default());
+            match tokio::time::timeout(
+                Duration::from_secs(3600),
+                tokio::task::spawn_blocking(move || s.scan_path(&path)),
+            )
+            .await
+            {
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => Err(anyhow::anyhow!("scan panicked: {e}")),
+                Err(_) => Err(anyhow::anyhow!("scan did not finish within an hour")),
+            }
         } else {
             let platform = self.platform.clone();
             let cmd = c.clone();

@@ -140,8 +140,12 @@ uploader. Response actions (kill, quarantine, restore, isolate, unisolate,
 uninstall) live in `xdr-linux/src/response.rs`. The Live stream opens with
 `LiveHello{commands: true}`, so commands arrive at once; commands from Live
 and heartbeats are deduplicated by ID. Commands not ported yet fail at once
-with "not supported by xdr-agent <version> yet", and a remote shell request
-gets a `ShellExit` error.
+with "not supported by xdr-agent <version> yet". Since 0.10.3 the Live
+stream also carries remote shells (`xdr-linux/src/shell.rs`: `su -l` on a
+new pty, at most 8, hung up when the stream drops, `disable_remote_shell`
+in agent.yaml refuses them) and the live view (`xdr-linux/src/activity.rs`).
+Every process in a console shell has `XDR_CONSOLE_SESSION=<session id>`,
+kept through `su -l` with `-w`.
 
 Build: `make agent` (Docker, static musl binary in `bin/xdr-agent`) or
 `cd agent-rs && cargo build --release`. The console image builds the amd64
@@ -164,16 +168,39 @@ that clean-up, so the install and uninstall scripts keep working.
 The Go agent's eBPF C program and compiled objects are kept in
 `agent-rs/bpf/` for the eBPF port.
 
+Since 0.10.4 the agent loads the committed CO-RE objects (`agent-rs/bpf/`,
+embedded in the binary) with aya (`xdr-linux/src/ebpf.rs`). LSM path
+kprobes report file create, write, delete, rename and chmod with the acting
+process, under the configured paths, with no watch limit; `tcp_connect` and
+`inet_csk_accept` report every TCP connection. When eBPF works the inotify
+collector is not started and /proc/net polling reports only UDP and
+listeners. Without kernel BTF, or when a hook group cannot attach, the old
+collector stays for that source; `ebpf: off` in agent.yaml turns it off.
+
+Since 0.10.5 the agent scans with YARA (`xdr-core/src/scanner.rs`, boreal,
+a pure Rust engine, so the binary stays static). The heartbeat reports the
+loaded content version; when the console's differs the agent downloads the
+detection content, compiles it and caches it in the queue database, so rules
+survive a restart without the console. A rule set that does not compile is
+rejected and the old one stays. With the policy's anti-malware module on,
+new and changed files and the binaries of new processes are queued for a
+background scan (dropped when the queue is full, files over
+`scan_max_bytes`, default 32 MiB, and the state directory skipped), and a
+match is reported as a `YaraMatch` event; with auto-quarantine on the file is
+quarantined first and the event says so. **Scan path** scans a file or tree
+on request and returns how many files matched.
+
 Porting order to parity: response actions and Live commands (done in
 0.10.0), self-update (done in 0.10.1, `xdr-core/src/update.rs`: chunked
 download over mTLS, SHA-256 and `-version` check, atomic swap, exit so
 systemd restarts it, rollback to the previous binary when the new one does
 not reach the console within 3 minutes or 3 starts), eBPF CO-RE collectors
-(reusing the committed BPF objects), YARA scanning and detection content,
+(done in 0.10.4, see below), YARA scanning and detection content (done in
+0.10.5),
 prevention modules (fanotify exec/script blocking, application control, FIM,
 firewall, IPS, web reputation, device control including read-only USB),
 tamper protection and the self-protection password, PAM, live shell and
-activity, bash command telemetry (uprobes on readline and parse_and_execute,
+activity (done in 0.10.3), bash command telemetry (uprobes on readline and parse_and_execute,
 emitting ShellCommandEvent).
 
 ## Detection pipeline (0.9)

@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/xdr-proto", "crates/xdr-core", "crates/xdr-linux", "crates/xdr-agent"]
 
 [workspace.package]
-version = "0.10.1"
+version = "0.10.5"
 edition = "2024"
 license = "UNLICENSED"
 publish = false

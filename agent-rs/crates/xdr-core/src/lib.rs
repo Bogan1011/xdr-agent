@@ -11,6 +11,7 @@ pub mod identity;
 pub mod live;
 pub mod platform;
 pub mod queue;
+pub mod scanner;
 pub mod transport;
 pub mod update;
 pub mod uploader;

@@ -1,7 +1,9 @@
 //! New TCP and UDP connections and listening sockets from /proc/net,
 //! attributed to a process through socket inodes. A connection to a local
-//! listening port is inbound (accept), anything else outbound (connect). Polling can miss connections shorter than
-//! the interval; the eBPF collector (ported later) closes that gap.
+//! listening port is inbound (accept), anything else outbound (connect).
+//! Polling can miss connections shorter than the interval, so when eBPF is
+//! available TCP connections come from it and this only reports UDP and
+//! listeners.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -22,6 +24,9 @@ const UDP_UNCONNECTED: &str = "07";
 
 pub struct Network {
     pub interval: Duration,
+    /// TCP connections come from the eBPF collector; poll only UDP and
+    /// listeners.
+    pub skip_tcp_connections: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -65,7 +70,7 @@ impl Collector for Network {
             if !fresh.is_empty() {
                 let owners = socket_owners();
                 for s in fresh {
-                    if first && s.state != LISTEN {
+                    if (first || self.skip_tcp_connections && s.proto.starts_with("tcp")) && s.state != LISTEN {
                         continue;
                     }
                     let pid = owners.get(&s.inode).copied().unwrap_or(0);

@@ -24,6 +24,12 @@ pub struct Config {
     pub queue_bytes: u64,
     pub batch_size: usize,
     pub log_level: String,
+    /// Refuses remote shells from the console on this host.
+    pub disable_remote_shell: bool,
+    /// "off" keeps the inotify and /proc collectors even where eBPF works.
+    pub ebpf: String,
+    /// Largest file the YARA scanner reads.
+    pub scan_max_bytes: u64,
 }
 
 impl Default for Config {
@@ -61,6 +67,9 @@ impl Default for Config {
             queue_bytes: 256 << 20,
             batch_size: 500,
             log_level: "info".into(),
+            disable_remote_shell: false,
+            ebpf: String::new(),
+            scan_max_bytes: 32 << 20,
         }
     }
 }
