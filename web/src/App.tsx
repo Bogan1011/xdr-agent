@@ -5,6 +5,7 @@ import { MeContext } from "./me";
 import Login from "./pages/Login";
 import { usePoll } from "./hooks";
 import { icons } from "./icons";
+import { Logo } from "./components/Logo";
 
 // Pages load on first visit so the console starts fast; xterm and the graph
 // code only download when a page that needs them is opened.
@@ -153,8 +154,8 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     <div className={"shell" + (collapsed ? " collapsed" : "")}>
       <aside className="side" aria-label="Main navigation">
         <div className="brand">
-          <span className="brand-mark" aria-hidden>{icons.logo}</span>
-          <span className="brand-text side-label">XDR<span>Console</span></span>
+          <Logo size={30} />
+          <span className="brand-text side-label">Ironsight<span>XDR</span></span>
         </div>
         <button className="side-search" onClick={() => setPalette(true)} title="Search or jump to (Ctrl+K)">
           {icons.search}
@@ -198,7 +199,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           </div>
           <div className="topbar-right">
             <span className="live"><span className="pulse" aria-hidden /> Live</span>
-            <NavLink to="/profile" className="muted">{user} · {me.role_id}</NavLink>
+            <NavLink to="/profile" className="muted topbar-user">{user} · {me.role_id}</NavLink>
             <button className="ghost" onClick={() => api.logout().finally(onSignOut)}>Sign out</button>
           </div>
         </header>

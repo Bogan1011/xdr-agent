@@ -26,7 +26,7 @@ export default function EndpointDetail() {
 
   const a = agent.data;
   if (agent.error) return <div className="error">{agent.error}</div>;
-  if (!a) return null;
+  if (!a) return <div className="page-loading" aria-label="Loading" />;
 
   async function revoke() {
     if (!confirm(`Revoke ${a!.hostname}? It will no longer be able to send telemetry.`)) return;
@@ -100,9 +100,11 @@ export default function EndpointDetail() {
           <div>
             <dt>Tamper protection</dt>
             <dd>
-              <ProtectionBadge agent={a} />{" "}
-              {!a.revoked && <button className="link" onClick={toggleProtection}>{a.tamper_protection ? "Turn off" : "Turn on"}</button>}{" "}
-              <button className="link" onClick={showToken}>{token ? "Hide maintenance token" : "Show maintenance token"}</button>
+              <ProtectionBadge agent={a} />
+              <div className="dd-actions">
+                {!a.revoked && <button className="chip-btn" onClick={toggleProtection}>{a.tamper_protection ? "Turn off" : "Turn on"}</button>}
+                <button className="chip-btn" onClick={showToken}>{token ? "Hide token" : "Maintenance token"}</button>
+              </div>
             </dd>
           </div>
           {token && (
@@ -120,9 +122,11 @@ export default function EndpointDetail() {
           <div>
             <dt>Sudo session recording</dt>
             <dd>
-              {a.pam_record_all ? "All sessions" : "Just-in-time grants"}{" "}
-              {!a.revoked && <button className="link" onClick={toggleRecording}>{a.pam_record_all ? "Record grants only" : "Record all"}</button>}{" "}
-              <Link to="/pam">Privileged access</Link>
+              {a.pam_record_all ? "All sessions" : "Just-in-time grants"}
+              <div className="dd-actions">
+                {!a.revoked && <button className="chip-btn" onClick={toggleRecording}>{a.pam_record_all ? "Grants only" : "Record all"}</button>}
+                <Link className="chip-btn" to="/pam">PAM →</Link>
+              </div>
             </dd>
           </div>
           <div><dt>Agent CPU / memory</dt><dd>{a.cpu_percent.toFixed(1)}% · {formatBytes(a.rss_bytes)}</dd></div>
