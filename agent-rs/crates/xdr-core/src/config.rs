@@ -30,6 +30,9 @@ pub struct Config {
     pub ebpf: String,
     /// Largest file the YARA scanner reads.
     pub scan_max_bytes: u64,
+    /// The file this was loaded from.
+    #[serde(skip)]
+    pub config_path: PathBuf,
 }
 
 impl Default for Config {
@@ -70,6 +73,7 @@ impl Default for Config {
             disable_remote_shell: false,
             ebpf: String::new(),
             scan_max_bytes: 32 << 20,
+            config_path: PathBuf::new(),
         }
     }
 }
@@ -77,13 +81,14 @@ impl Default for Config {
 impl Config {
     pub fn load(path: &Path) -> Result<Config> {
         let raw = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-        let c: Config = serde_yaml_ng::from_str(&raw).with_context(|| format!("parse {}", path.display()))?;
+        let mut c: Config = serde_yaml_ng::from_str(&raw).with_context(|| format!("parse {}", path.display()))?;
         if c.server.is_empty() {
             bail!("{}: server is required", path.display());
         }
         if c.enroll_server.is_empty() {
             bail!("{}: enroll_server is required", path.display());
         }
+        c.config_path = path.to_path_buf();
         Ok(c)
     }
 

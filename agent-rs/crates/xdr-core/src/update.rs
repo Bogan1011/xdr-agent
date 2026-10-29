@@ -239,6 +239,13 @@ fn replace(exe: &Path, src: &Path) -> Result<()> {
     let tmp = PathBuf::from(tmp);
     fs::copy(src, &tmp).with_context(|| format!("copy to {}", tmp.display()))?;
     fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755))?;
+    // Tamper protection makes the binary immutable; it locks the new one
+    // after the restart.
+    let _ = std::process::Command::new("chattr")
+        .arg("-i")
+        .arg(exe)
+        .stderr(std::process::Stdio::null())
+        .status();
     if let Err(err) = fs::rename(&tmp, exe) {
         let _ = fs::remove_file(&tmp);
         return Err(err).with_context(|| format!("replace {}", exe.display()));

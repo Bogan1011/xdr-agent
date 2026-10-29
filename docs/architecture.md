@@ -159,11 +159,11 @@ unit, config, state directory (`/var/lib/xdr-agent`), identity files,
 isolation state and quarantine records. A Go endpoint moves over with a
 console **Update**: the Go agent downloads the new binary, checks that
 `xdr-agent -version` prints the release version, swaps it in and restarts;
-the endpoint keeps its agent ID. On every start the Rust agent clears what
-the Go agent enforced and it does not manage yet: tamper immutable flags and
-the RefuseManualStop drop-in, the `xdr_firewall` nftables table, and the JIT
-sudo and session-recording sudoers files. `xdr-agent maintenance` only does
-that clean-up, so the install and uninstall scripts keep working.
+the endpoint keeps its agent ID. On every start the Rust agent removes the
+Go agent's JIT sudo and session-recording sudoers files, which it does not
+manage yet. Since 0.10.6 it takes over the Go agent's prevention state as is:
+the `xdr_firewall`, `xdr_webrep` and `xdr_ips` tables, `tamper.json`, the
+RefuseManualStop drop-in, `fim.json` and `devctl.json`.
 
 The Go agent's eBPF C program and compiled objects are kept in
 `agent-rs/bpf/` for the eBPF port.
@@ -190,16 +190,48 @@ match is reported as a `YaraMatch` event; with auto-quarantine on the file is
 quarantined first and the event says so. **Scan path** scans a file or tree
 on request and returns how many files matched.
 
+Since 0.10.6 the agent enforces the prevention policy
+(`xdr-linux/src/prevention/`, rules ported from `internal/policy`, which the
+console still uses to validate). The heartbeat hands the policy, the
+detection content's hash/IP/domain IOCs and the tamper policy to the
+platform; the cached policy applies at start, before enrollment, so it holds
+while the console is unreachable. The heartbeat reports `PreventionState`
+and `tamper_protected`. Modules:
+
+- **Exec blocking and application control** (`execblock.rs`): fanotify
+  `FAN_OPEN_EXEC_PERM` on every local filesystem; denies hash IOCs
+  (anti-malware *block known bad*) and application control block lists and
+  lockdown. The agent's state directory is exempt from application control
+  so self-update can test-run the new binary. In monitor mode, or when
+  fanotify is unavailable, matches are reported from process events.
+- **Script blocking** (`scriptblock.rs`): `FAN_OPEN_PERM` on the script
+  folders; an interpreter opening the script it was started with is denied.
+  Scripts in folders made since the last rescan (3 s) are killed after start.
+- **FIM** (`fim.rs`): baseline of hashes, modes and owners; file events are
+  checked after a 2 s debounce, plus a full rescan every interval. **FIM
+  rebaseline** accepts the current state.
+- **Host firewall** (`xdr_firewall`), **web reputation** (`xdr_webrep`,
+  domains resolved every 10 minutes) and **intrusion prevention**
+  (`xdr_ips`, bans with nftables set timeouts; failed SSH logins come from
+  the auth collector) never block the console or loopback.
+- **Device control** (`devctl.rs`): USB storage block (sysfs deauthorize)
+  or read-only (BLKROSET and remount), with an allow-list by vendor:product.
+- **Activity monitoring** filters process, file and network telemetry on
+  the way to the queue; local detection still sees it.
+- **Tamper protection** (`tamper.rs`): `chattr +i` on the binary, config,
+  CA and unit, a RefuseManualStop drop-in and SIGTERM ignored unless the
+  host shuts down; removing a flag, an unclean restart and a suspended
+  window are reported. `xdr-agent maintenance --token T` or
+  `--password P` (the policy's self-protection password, PBKDF2-SHA256)
+  suspends it for `--duration` (default 1h).
+
 Porting order to parity: response actions and Live commands (done in
 0.10.0), self-update (done in 0.10.1, `xdr-core/src/update.rs`: chunked
 download over mTLS, SHA-256 and `-version` check, atomic swap, exit so
 systemd restarts it, rollback to the previous binary when the new one does
 not reach the console within 3 minutes or 3 starts), eBPF CO-RE collectors
 (done in 0.10.4, see below), YARA scanning and detection content (done in
-0.10.5),
-prevention modules (fanotify exec/script blocking, application control, FIM,
-firewall, IPS, web reputation, device control including read-only USB),
-tamper protection and the self-protection password, PAM, live shell and
+0.10.5), prevention modules and tamper protection (done in 0.10.6), PAM, live shell and
 activity (done in 0.10.3), bash command telemetry (uprobes on readline and parse_and_execute,
 emitting ShellCommandEvent).
 

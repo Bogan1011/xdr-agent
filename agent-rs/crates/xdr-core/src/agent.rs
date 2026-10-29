@@ -30,6 +30,31 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
         tracing::info!(name = %p.name, version = p.version, "last known policy loaded from cache");
     }
     platform.restore();
+    // Prevention starts before enrollment, from the cached policy, so it
+    // applies at boot even when the console is unreachable.
+    let bus = Bus::new(20_000);
+    platform.start_prevention(bus.sink().named("prevention"));
+    if let Some(p) = heartbeat::cached_policy(&queue) {
+        platform.set_policy(&p);
+    }
+    if let Some(c) = heartbeat::cached_content(&queue) {
+        platform.set_content(&c);
+    }
+    // Prevention reads /proc and may kill, so it observes on its own thread.
+    let mut prevention = bus.subscribe();
+    let observer = platform.clone();
+    std::thread::Builder::new()
+        .name("prevention-observer".into())
+        .spawn(move || {
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                match prevention.blocking_recv() {
+                    Ok(e) => observer.observe(&e),
+                    Err(RecvError::Lagged(n)) => tracing::debug!(skipped = n, "prevention lagged behind the bus"),
+                    Err(RecvError::Closed) => break,
+                }
+            }
+        })?;
     let updater = Arc::new(Updater::new(&cfg.state_dir));
     updater.check();
 
@@ -46,7 +71,6 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
     let client = transport::agent_client(&cfg, &id)?;
     let hb_wake = Arc::new(Notify::new());
     let restart = Arc::new(Notify::new());
-    let bus = Bus::new(20_000);
     let quarantine = platform.clone();
     let (scanner, scan_queue) = Scanner::new(
         bus.sink().named("yara"),
@@ -106,7 +130,14 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
         let sink = bus.sink().named(c.name());
         spawn_collector(c, sink);
     }
-    tokio::spawn(bus.run(id.agent_id.clone(), platform.resolver(), queue.clone(), wake.clone()));
+    let filter = platform.clone();
+    tokio::spawn(bus.run(
+        id.agent_id.clone(),
+        platform.resolver(),
+        queue.clone(),
+        wake.clone(),
+        Arc::new(move |t| filter.telemetry(t)),
+    ));
     tokio::spawn(
         Uploader {
             client: client.clone(),
@@ -120,7 +151,7 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
     tokio::spawn(
         Heartbeat {
             client,
-            platform,
+            platform: platform.clone(),
             queue,
             sent,
             bus_dropped,
@@ -139,7 +170,10 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
     );
 
     tokio::select! {
-        _ = shutdown_signal() => tracing::info!("stopping"),
+        _ = shutdown_signal(platform.clone()) => {
+            tracing::info!("stopping");
+            platform.stopping();
+        }
         // Exit non-zero so systemd restarts the unit into the new binary
         // whatever its Restart= setting.
         _ = restart.notified() => std::process::exit(3),
@@ -164,11 +198,21 @@ fn spawn_collector(mut c: Box<dyn Collector>, sink: EventSink) {
         .expect("spawn collector thread");
 }
 
-async fn shutdown_signal() {
+/// Returns on SIGINT, or on SIGTERM unless tamper protection refuses it.
+async fn shutdown_signal<P: Platform>(platform: Arc<P>) {
     use tokio::signal::unix::{SignalKind, signal};
     let mut term = signal(SignalKind::terminate()).expect("SIGTERM handler");
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
-        _ = term.recv() => {}
+    loop {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => return,
+            _ = term.recv() => {}
+        }
+        let p = platform.clone();
+        if tokio::task::spawn_blocking(move || p.stop_allowed())
+            .await
+            .unwrap_or(true)
+        {
+            return;
+        }
     }
 }

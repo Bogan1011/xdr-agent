@@ -1,7 +1,7 @@
-//! Linux adapters for the XDR agent core: netlink process events, inotify
-//! file events, /proc/net connections and procfs process identity. eBPF CO-RE
-//! and fanotify prevention are ported next. Response actions live in
-//! [`response`].
+//! Linux adapters for the XDR agent core: netlink process events, eBPF or
+//! inotify file events, /proc/net connections and procfs process identity.
+//! Response actions live in [`response`], policy enforcement in
+//! [`prevention`].
 
 pub mod activity;
 pub mod auth;
@@ -17,6 +17,7 @@ pub mod memory;
 pub mod migrate;
 pub mod network;
 pub mod persistence;
+pub mod prevention;
 pub mod process;
 pub mod procfs;
 pub mod resolver;
@@ -37,17 +38,25 @@ pub struct Linux {
     shells: shell::Shells,
     /// Loaded eBPF programs; collectors() takes their ring buffers.
     probes: std::sync::Mutex<Option<ebpf::Probes>>,
+    prevention: Arc<prevention::Prevention>,
 }
 
 impl Linux {
     pub fn new(cfg: &Config) -> Self {
         let hasher = Arc::new(procfs::Hasher::new(50_000));
+        let console = vec![cfg.server.clone(), cfg.enroll_server.clone()];
         Linux {
+            prevention: Arc::new(prevention::Prevention::new(
+                cfg.state_dir.clone(),
+                console.clone(),
+                cfg.scan_max_bytes,
+                &protected_files(cfg),
+            )),
             resolver: Arc::new(resolver::Resolver::new(hasher.clone())),
             hasher,
             responder: response::Responder {
                 state_dir: cfg.state_dir.clone(),
-                console: vec![cfg.server.clone(), cfg.enroll_server.clone()],
+                console,
             },
             sampler: Default::default(),
             shells: shell::Shells::new(cfg.disable_remote_shell),
@@ -132,7 +141,14 @@ impl Platform for Linux {
     }
 
     fn respond(&self, c: &pb::AgentCommand) -> anyhow::Result<String> {
-        self.responder.respond(c)
+        match c.r#type() {
+            pb::CommandType::FimRebaseline => self.prevention.fim.rebaseline(),
+            pb::CommandType::Uninstall => {
+                self.prevention.tamper.release();
+                self.responder.respond(c)
+            }
+            _ => self.responder.respond(c),
+        }
     }
 
     fn isolated(&self) -> bool {
@@ -168,4 +184,53 @@ impl Platform for Linux {
         migrate::cleanup_go_agent();
         self.responder.restore_isolation();
     }
+
+    fn start_prevention(&self, sink: xdr_core::bus::EventSink) {
+        self.prevention.start(sink);
+    }
+
+    fn set_policy(&self, p: &pb::PreventionPolicy) {
+        self.prevention.set_policy(p);
+    }
+
+    fn set_content(&self, c: &pb::DetectionContent) {
+        self.prevention.set_content(c);
+    }
+
+    fn set_tamper(&self, t: &pb::TamperPolicy) {
+        self.prevention.tamper.set_policy(t);
+    }
+
+    fn prevention_state(&self) -> Option<pb::PreventionState> {
+        Some(self.prevention.state())
+    }
+
+    fn tamper_protected(&self) -> bool {
+        self.prevention.tamper.applied()
+    }
+
+    fn observe(&self, e: &pb::Event) {
+        self.prevention.observe(e);
+    }
+
+    fn telemetry(&self, t: pb::EventType) -> bool {
+        self.prevention.telemetry(t)
+    }
+
+    fn stop_allowed(&self) -> bool {
+        self.prevention.tamper.stop_allowed()
+    }
+
+    fn stopping(&self) {
+        self.prevention.tamper.clear_running_marker();
+    }
+}
+
+/// The agent's config and CA, which tamper protection makes immutable.
+pub fn protected_files(cfg: &Config) -> Vec<std::path::PathBuf> {
+    let mut out = vec![cfg.ca_file.clone()];
+    if !cfg.config_path.as_os_str().is_empty() {
+        out.push(cfg.config_path.clone());
+    }
+    out
 }

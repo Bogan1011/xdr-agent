@@ -16,8 +16,6 @@ use sha2::{Digest, Sha256};
 use xdr_core::pb::{self, CommandType};
 
 pub const ISOLATION_TABLE: &str = "xdr_isolation";
-/// Left behind by the retired Go agent's firewall module.
-pub const FIREWALL_TABLE: &str = "xdr_firewall";
 
 pub struct Responder {
     pub state_dir: PathBuf,
@@ -54,7 +52,9 @@ impl Responder {
         // Mirrors the console's uninstall.sh.
         let script = format!(
             "sleep 2\nnft delete table inet {ISOLATION_TABLE} 2>/dev/null || true\n\
-             nft delete table inet {FIREWALL_TABLE} 2>/dev/null || true\n\
+             nft delete table inet xdr_firewall 2>/dev/null || true\n\
+             nft delete table inet xdr_webrep 2>/dev/null || true\n\
+             nft delete table inet xdr_ips 2>/dev/null || true\n\
              systemctl disable --now xdr-agent 2>/dev/null || true\n\
              rm -rf /etc/systemd/system/xdr-agent.service /etc/systemd/system/xdr-agent.service.d\n\
              systemctl daemon-reload 2>/dev/null || true\n\
@@ -151,28 +151,8 @@ impl Responder {
         self.isolation_file().exists()
     }
 
-    fn console_addrs(&self) -> Result<Vec<IpAddr>> {
-        let mut out = Vec::new();
-        for hp in &self.console {
-            if hp.is_empty() {
-                continue;
-            }
-            let addrs: Vec<SocketAddr> = match hp.parse::<SocketAddr>() {
-                Ok(a) => vec![a],
-                Err(_) => {
-                    let host = hp.rsplit_once(':').map_or(hp.as_str(), |(h, _)| h);
-                    (host, 0)
-                        .to_socket_addrs()
-                        .with_context(|| format!("resolve console {host}"))?
-                        .collect()
-                }
-            };
-            out.extend(addrs.into_iter().map(|a| unmap(a.ip())));
-        }
-        if out.is_empty() {
-            bail!("no console address to keep reachable");
-        }
-        Ok(out)
+    pub fn console_addrs(&self) -> Result<Vec<IpAddr>> {
+        console_addrs(&self.console)
     }
 
     fn apply_isolation(&self, allow: &[String]) -> Result<String> {
@@ -214,6 +194,31 @@ impl Responder {
             Err(err) => tracing::error!("re-applying network isolation failed: {err:#}"),
         }
     }
+}
+
+/// Resolves the console's host:port addresses to IPs.
+pub fn console_addrs(console: &[String]) -> Result<Vec<IpAddr>> {
+    let mut out = Vec::new();
+    for hp in console {
+        if hp.is_empty() {
+            continue;
+        }
+        let addrs: Vec<SocketAddr> = match hp.parse::<SocketAddr>() {
+            Ok(a) => vec![a],
+            Err(_) => {
+                let host = hp.rsplit_once(':').map_or(hp.as_str(), |(h, _)| h);
+                (host, 0)
+                    .to_socket_addrs()
+                    .with_context(|| format!("resolve console {host}"))?
+                    .collect()
+            }
+        };
+        out.extend(addrs.into_iter().map(|a| unmap(a.ip())));
+    }
+    if out.is_empty() {
+        bail!("no console address to keep reachable");
+    }
+    Ok(out)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -331,13 +336,13 @@ fn unix_now() -> i64 {
         .map_or(0, |d| d.as_secs() as i64)
 }
 
-fn which(bin: &str) -> bool {
+pub fn which(bin: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|path| std::env::split_paths(&path).any(|d| d.join(bin).is_file()))
 }
 
-fn nft(script: &str) -> Result<()> {
+pub fn nft(script: &str) -> Result<()> {
     if !which("nft") {
-        bail!("nft not found: install the nftables package to use host isolation");
+        bail!("nft not found: install the nftables package");
     }
     let mut child = Command::new("nft")
         .args(["-f", "-"])
@@ -355,7 +360,7 @@ fn nft(script: &str) -> Result<()> {
     Ok(())
 }
 
-fn unmap(a: IpAddr) -> IpAddr {
+pub fn unmap(a: IpAddr) -> IpAddr {
     match a {
         IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(a, IpAddr::V4),
         v4 => v4,
@@ -370,7 +375,7 @@ pub struct Prefix {
 }
 
 impl Prefix {
-    fn host(a: IpAddr) -> Prefix {
+    pub fn host(a: IpAddr) -> Prefix {
         let a = unmap(a);
         Prefix {
             addr: a,
@@ -394,8 +399,21 @@ impl Prefix {
         })
     }
 
-    fn contains(&self, a: IpAddr) -> bool {
+    pub fn contains(&self, a: IpAddr) -> bool {
         a.is_ipv4() == self.addr.is_ipv4() && mask(a, self.bits) == self.addr
+    }
+
+    pub fn is_ipv4(&self) -> bool {
+        self.addr.is_ipv4()
+    }
+
+    pub fn addr(&self) -> IpAddr {
+        self.addr
+    }
+
+    /// A single address rather than a network.
+    pub fn is_host(&self) -> bool {
+        self.bits == if self.addr.is_ipv4() { 32 } else { 128 }
     }
 }
 
@@ -420,7 +438,7 @@ fn mask(a: IpAddr, bits: u8) -> IpAddr {
 
 /// nft rejects overlapping interval elements, so drop duplicates and
 /// prefixes contained in another.
-fn dedupe(input: &[Prefix]) -> Vec<Prefix> {
+pub fn dedupe(input: &[Prefix]) -> Vec<Prefix> {
     let mut out = Vec::new();
     for (i, p) in input.iter().enumerate() {
         let covered = input
