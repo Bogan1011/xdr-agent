@@ -306,6 +306,23 @@ impl DeviceControl {
         self.emit.emit(e);
     }
 
+    /// Gives back every device it blocked or made read-only and stops
+    /// enforcing, before an uninstall: a blocked USB disk would otherwise
+    /// stay unusable until it is replugged.
+    pub fn release_all(&self) {
+        let mut i = self.inner.lock().unwrap();
+        i.pol = None;
+        for name in std::mem::take(&mut i.blocked).into_keys() {
+            if let Err(err) = self.authorize(&name, true) {
+                tracing::warn!(device = %name, "re-authorizing USB device failed: {err}");
+            }
+        }
+        for b in std::mem::take(&mut i.ro) {
+            let _ = (self.set_read_only)(&b, false);
+        }
+        let _ = std::fs::remove_file(&self.file);
+    }
+
     /// Whether the module is on and how many devices it blocks.
     pub fn status(&self) -> (bool, usize) {
         let i = self.inner.lock().unwrap();
@@ -472,5 +489,31 @@ mod tests {
         dc.set_policy(&pol);
         dc.scan();
         assert!(RO_CALLS.lock().unwrap().contains(&("sdb1".into(), false)));
+    }
+
+    #[test]
+    fn release_all_unblocks_for_uninstall() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("usb");
+        fake_usb(&root, "2-1", ("0781", "5584"));
+        let dc = DeviceControl::with_root(
+            Emitter::default(),
+            tmp.path().join("devctl.json"),
+            root.clone(),
+            fake_ro,
+        );
+        dc.set_policy(&pb::DeviceControlPolicy {
+            enabled: true,
+            usb_storage: "block".into(),
+            ..Default::default()
+        });
+        dc.scan();
+        assert_eq!(read_sys(root.join("2-1/authorized")), "0");
+        dc.release_all();
+        assert_eq!(read_sys(root.join("2-1/authorized")), "1");
+        assert_eq!(dc.status(), (false, 0));
+        assert!(!tmp.path().join("devctl.json").exists());
+        dc.scan();
+        assert_eq!(read_sys(root.join("2-1/authorized")), "1");
     }
 }

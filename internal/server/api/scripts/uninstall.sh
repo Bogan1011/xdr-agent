@@ -34,6 +34,15 @@ if systemctl list-unit-files xdr-agent.service >/dev/null 2>&1; then
   nft delete table inet xdr_webrep 2>/dev/null || true
   nft delete table inet xdr_ips 2>/dev/null || true
 fi
+
+# USB storage devices that device control blocked would otherwise stay
+# unusable until replugged.
+if [[ -s /var/lib/xdr-agent/devctl.json ]]; then
+  for dev in $(grep -o '"[0-9][0-9.-]*":{' /var/lib/xdr-agent/devctl.json | tr -d '":{'); do
+    [[ -w "/sys/bus/usb/devices/$dev/authorized" ]] && echo 1 > "/sys/bus/usb/devices/$dev/authorized" || true
+  done
+fi
+
 rm -rf /etc/systemd/system/xdr-agent.service /etc/systemd/system/xdr-agent.service.d
 systemctl daemon-reload
 rm -f /usr/local/bin/xdr-agent /etc/sudoers.d/xdr-jit-* /etc/sudoers.d/xdr-session-recording

@@ -22,6 +22,7 @@ use xdr_core::platform::Collector;
 
 use crate::file::{Actor, emit_file, process_exe};
 use crate::procfs::{self, Hasher};
+use crate::writers::{Writer, Writers};
 
 #[cfg(target_arch = "x86_64")]
 static OBJECT: &[u8] = aya::include_bytes_aligned!("../../../bpf/xdr_x86_bpfel.o");
@@ -275,6 +276,27 @@ pub struct EbpfFile {
     pub paths: Vec<String>,
     pub exclude: Vec<String>,
     pub hasher: Arc<Hasher>,
+    /// Who changed persistence paths, for the persistence collector.
+    pub writers: Arc<Writers>,
+}
+
+impl EbpfFile {
+    /// Remembers the writer of a persistence path, whatever the file paths.
+    fn note_writer(&self, r: &FileRec) {
+        for p in [&r.path, &r.old_path] {
+            if !p.is_empty() && crate::persistence::classify(p).is_some() {
+                self.writers.record(
+                    p,
+                    Writer {
+                        pid: r.pid,
+                        uid: r.uid,
+                        comm: r.comm.clone(),
+                        exe: process_exe(r.pid, &r.comm),
+                    },
+                );
+            }
+        }
+    }
 }
 
 fn under_any(path: &str, roots: &[String]) -> bool {
@@ -372,6 +394,7 @@ impl Collector for EbpfFile {
             match raw {
                 Some(raw) => {
                     if let Some(r) = parse_file(raw) {
+                        me.note_writer(&r);
                         st.handle(r, &mut out);
                     }
                 }

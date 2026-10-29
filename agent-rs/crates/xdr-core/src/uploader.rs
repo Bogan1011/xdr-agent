@@ -1,5 +1,8 @@
 //! Drains the durable queue to the console. A batch is deleted only after
 //! SendEvents succeeds; failures back off from 1 s to 60 s with jitter.
+//! A batch the console rejects as too large or malformed is split, and a
+//! single event it still rejects is dropped, so one bad event cannot stall
+//! the queue.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -23,9 +26,12 @@ pub struct Uploader {
 impl Uploader {
     pub async fn run(mut self) {
         let mut backoff = Duration::from_secs(1);
+        let max = self.batch_size.max(1);
+        let mut size = max;
+        let mut offline_since: Option<std::time::Instant> = None;
         loop {
             let q = self.queue.clone();
-            let n = self.batch_size;
+            let n = size;
             let items = match tokio::task::spawn_blocking(move || q.peek(n)).await {
                 Ok(Ok(items)) => items,
                 Ok(Err(err)) => {
@@ -49,14 +55,42 @@ impl Uploader {
             req.set_timeout(Duration::from_secs(20));
             match self.client.send_events(req).await {
                 Ok(_) => {
+                    if let Some(t) = offline_since.take() {
+                        let q = self.queue.clone();
+                        let queued = tokio::task::spawn_blocking(move || q.len().unwrap_or(0))
+                            .await
+                            .unwrap_or(0);
+                        tracing::info!(offline_for = ?t.elapsed(), queued, "console reachable again, sending buffered events");
+                    }
                     self.sent.fetch_add(ids.len() as u64, Ordering::Relaxed);
                     let q = self.queue.clone();
                     if let Ok(Err(err)) = tokio::task::spawn_blocking(move || q.ack(&ids)).await {
                         tracing::error!(%err, "removing sent events from the local queue failed");
                     }
                     backoff = Duration::from_secs(1);
+                    size = (size * 2).min(max);
+                }
+                Err(status) if rejected(status.code()) => {
+                    if ids.len() > 1 {
+                        size = (ids.len() / 2).max(1);
+                        tracing::warn!(code = ?status.code(), msg = status.message(), batch = ids.len(),
+                            next = size, "console rejected the batch, splitting it");
+                    } else {
+                        tracing::error!(code = ?status.code(), msg = status.message(),
+                            "console rejected an event, dropping it");
+                        let q = self.queue.clone();
+                        let _ = tokio::task::spawn_blocking(move || q.ack(&ids)).await;
+                    }
                 }
                 Err(status) => {
+                    if offline_since.is_none() {
+                        offline_since = Some(std::time::Instant::now());
+                        let q = self.queue.clone();
+                        let queued = tokio::task::spawn_blocking(move || q.len().unwrap_or(0))
+                            .await
+                            .unwrap_or(0);
+                        tracing::warn!(queued, "console unreachable, buffering events in the local queue");
+                    }
                     let wait = jitter(backoff);
                     tracing::warn!(code = ?status.code(), msg = status.message(), batch = ids.len(),
                         retry_in = ?wait, "sending events failed");
@@ -66,6 +100,14 @@ impl Uploader {
             }
         }
     }
+}
+
+/// Errors that retrying the same batch cannot fix.
+fn rejected(code: tonic::Code) -> bool {
+    matches!(
+        code,
+        tonic::Code::InvalidArgument | tonic::Code::ResourceExhausted | tonic::Code::OutOfRange
+    )
 }
 
 /// Spreads retries of many agents over 75 % to 125 % of the backoff.

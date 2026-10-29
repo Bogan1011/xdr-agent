@@ -231,9 +231,30 @@ download over mTLS, SHA-256 and `-version` check, atomic swap, exit so
 systemd restarts it, rollback to the previous binary when the new one does
 not reach the console within 3 minutes or 3 starts), eBPF CO-RE collectors
 (done in 0.10.4, see below), YARA scanning and detection content (done in
-0.10.5), prevention modules and tamper protection (done in 0.10.6), PAM, live shell and
+0.10.5), prevention modules and tamper protection (done in 0.10.6), release
+hardening (0.10.7: see below), PAM, live shell and
 activity (done in 0.10.3), bash command telemetry (uprobes on readline and parse_and_execute,
 emitting ShellCommandEvent).
+
+### Agent resilience (0.10.7)
+
+- Core tasks (bus, uploader, heartbeat, live stream, scanner) are
+  supervised: if one ends or panics the agent exits with code 70 and
+  systemd restarts it. Collectors restart on their own after a panic, and a
+  panic in prevention skips only that event.
+- Memory watchdog: when the agent's own RSS stays above `max_memory_bytes`
+  (agent.yaml, default 1 GiB, 0 off) for a minute it exits with code 71.
+  Remote shells and other children are not counted.
+- Uploader: a batch the console rejects as InvalidArgument, ResourceExhausted
+  or OutOfRange is halved until it goes through, and a single event that is
+  still rejected is dropped, so one bad event cannot stall the queue. Losing
+  and regaining the console are logged once each, with the queue length.
+- systemd: the agent keeps `xdr-agent.service.d/20-hardening.conf`
+  (no start-rate limit, Restart=always, CPUWeight/IOWeight 50,
+  TimeoutStopSec=30) so older installs get it with an update. install.sh
+  writes the same settings and fails when the agent does not stay up.
+- Uninstall (console or uninstall.sh) re-authorizes USB disks that device
+  control blocked.
 
 ## Detection pipeline (0.9)
 
