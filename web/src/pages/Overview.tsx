@@ -1,4 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
+import { useMe } from "../me";
+import { icons } from "../icons";
 import { api, categoryOf } from "../api";
 import { usePoll } from "../hooks";
 import Timeline from "../components/Timeline";
@@ -12,6 +14,9 @@ export default function Overview() {
   const summary = usePoll(api.alertSummary, 15000);
   const openAlerts = usePoll(() => api.alerts({ limit: 8 }), 15000);
   const nav = useNavigate();
+  const me = useMe();
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const sev = summary.data?.by_severity ?? {};
 
   const total = agents.data?.length ?? 0;
@@ -23,13 +28,17 @@ export default function Overview() {
   return (
     <>
       <header className="page-head">
-        <h1>Overview</h1>
-        <span className="muted">Last 24 hours</span>
+        <div>
+          <div className="muted small">{greeting}{me ? `, ${me.display_name || me.username}` : ""}</div>
+          <h1>Security overview</h1>
+        </div>
+        <span className="pill">Last 24 hours</span>
       </header>
       {(agents.error || stats.error) && <div className="error">{agents.error || stats.error}</div>}
 
       <section className="tiles">
-        <div className="tile">
+        <div className="tile tone-good">
+          <span className="tile-icon" aria-hidden>{icons.endpoint}</span>
           <div className="tile-label">Endpoints online</div>
           <div className="tile-value">
             {online}
@@ -41,17 +50,20 @@ export default function Overview() {
             </div>
           )}
         </div>
-        <div className="tile">
+        <div className="tile tone-accent">
+          <span className="tile-icon" aria-hidden>{icons.bolt}</span>
           <div className="tile-label">Events collected</div>
           <div className="tile-value">{events24h.toLocaleString()}</div>
         </div>
-        <div className="tile">
+        <div className="tile tone-peach">
+          <span className="tile-icon" aria-hidden>{icons.terminal}</span>
           <div className="tile-label">Process starts</div>
           <div className="tile-value">
             {(stats.data?.by_type.find((t) => t.type === "process_exec")?.count ?? 0).toLocaleString()}
           </div>
         </div>
-        <Link to="/alerts" className="tile tile-link">
+        <Link to="/alerts" className={"tile tile-link " + ((summary.data?.open ?? 0) > 0 ? "tone-critical" : "tone-lilac")}>
+          <span className="tile-icon" aria-hidden>{icons.bell}</span>
           <div className="tile-label">Open alerts</div>
           <div className="tile-value">{summary.data?.open ?? 0}</div>
           <div className="tile-note">
