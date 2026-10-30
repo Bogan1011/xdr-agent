@@ -27,6 +27,9 @@ pub struct Network {
     /// TCP connections come from the eBPF collector; poll only UDP and
     /// listeners.
     pub skip_tcp_connections: bool,
+    /// Likewise for UDP: eBPF reports each send, so connected UDP sockets
+    /// are not polled.
+    pub skip_udp_connections: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -70,7 +73,12 @@ impl Collector for Network {
             if !fresh.is_empty() {
                 let owners = socket_owners();
                 for s in fresh {
-                    if (first || self.skip_tcp_connections && s.proto.starts_with("tcp")) && s.state != LISTEN {
+                    let from_ebpf = if s.proto.starts_with("tcp") {
+                        self.skip_tcp_connections
+                    } else {
+                        self.skip_udp_connections
+                    };
+                    if (first || from_ebpf) && s.state != LISTEN {
                         continue;
                     }
                     let pid = owners.get(&s.inode).copied().unwrap_or(0);

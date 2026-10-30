@@ -49,9 +49,13 @@ impl Responder {
             .context("unsafe state directory")?;
         // Runs outside the agent's own unit, so stopping the unit does not
         // kill it; the pause lets the result reach the console first.
-        // Mirrors the console's uninstall.sh.
+        // Mirrors the console's uninstall.sh; a packaged agent is removed
+        // with its package manager first, so dpkg/rpm forget it too.
         let script = format!(
-            "sleep 2\nnft delete table inet {ISOLATION_TABLE} 2>/dev/null || true\n\
+            "sleep 2\n\
+             if dpkg-query -W -f='${{Status}}' xdr-agent 2>/dev/null | grep -q 'ok installed'; then dpkg --purge xdr-agent || true; \
+             elif rpm -q xdr-agent >/dev/null 2>&1; then rpm -e xdr-agent || true; fi\n\
+             nft delete table inet {ISOLATION_TABLE} 2>/dev/null || true\n\
              nft delete table inet xdr_firewall 2>/dev/null || true\n\
              nft delete table inet xdr_webrep 2>/dev/null || true\n\
              nft delete table inet xdr_ips 2>/dev/null || true\n\

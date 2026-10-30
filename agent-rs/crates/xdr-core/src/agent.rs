@@ -24,7 +24,7 @@ pub async fn run<P: Platform>(cfg: Config, platform: P) -> Result<()> {
     let started = Instant::now();
     let platform = Arc::new(platform);
     std::fs::create_dir_all(&cfg.state_dir)?;
-    let queue = Arc::new(Queue::open(&cfg.state_path("queue.db"), cfg.queue_bytes)?);
+    let queue = Arc::new(Queue::open(&cfg.state_path("queue.db"), cfg.queue_bytes, cfg.queue_disk_reserve_bytes)?);
     tracing::info!(queued = queue.len()?, bytes = queue.bytes(), "local queue opened");
     if let Some(p) = heartbeat::cached_policy(&queue) {
         tracing::info!(name = %p.name, version = p.version, "last known policy loaded from cache");

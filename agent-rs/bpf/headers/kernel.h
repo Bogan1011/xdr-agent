@@ -27,6 +27,7 @@ typedef __u16 umode_t;
 typedef _Bool bool;
 
 enum bpf_map_type {
+	BPF_MAP_TYPE_LRU_HASH = 9,
 	BPF_MAP_TYPE_RINGBUF = 27,
 };
 
@@ -96,6 +97,27 @@ struct sock_common {
 
 struct sock {
 	struct sock_common __sk_common;
+};
+
+struct msghdr {
+	void *msg_name;
+	int msg_namelen;
+};
+
+struct in_addr {
+	__be32 s_addr;
+};
+
+struct sockaddr_in {
+	unsigned short sin_family;
+	__be16 sin_port;
+	struct in_addr sin_addr;
+};
+
+struct sockaddr_in6 {
+	unsigned short sin6_family;
+	__be16 sin6_port;
+	struct in6_addr sin6_addr;
 };
 
 #pragma clang attribute pop

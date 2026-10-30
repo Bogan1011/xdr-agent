@@ -16,7 +16,7 @@ Fields are only ever appended to the proto and the table, never renumbered.
 | 2 | Parent/child tree | `parent_process_guid`, storyline | resolver | done |
 | 3 | Command line, executable, hashes | SHA-256, SHA-1, MD5 in one read | /proc, file | done (0.10) |
 | 3b | User/group, euid, loginuid, tty, session, capabilities, namespaces, exe owner/mode, run time | process payload + context | /proc | done (0.10) |
-| 4 | Network connect/accept/listen + process | `net_connect`, `net_accept`, `net_listen`; TCP+UDP, direction, netns | /proc/net + socket inodes | done (0.10); short-lived TCP connections via eBPF kprobes since 0.10.4 (UDP still /proc) |
+| 4 | Network connect/accept/listen + process | `net_connect`, `net_accept`, `net_listen`; TCP+UDP, direction, netns | /proc/net + socket inodes | done (0.10); short-lived TCP connections via eBPF kprobes since 0.10.4, UDP sends via eBPF since 0.10.8 (once per process and destination a minute) |
 | 5 | File create/write/delete/rename/attrib | `file_*`; inode, device, owner, gid, mount, fs type, hashes | eBPF hooks, inotify fallback (configured paths) | done (0.10); writer process with eBPF since 0.10.4 |
 | 6 | DNS query/response + process | `dns_query` | packet socket with a port-53 BPF filter, socket → process | done (0.10); TCP DNS and DoH not seen |
 | 7 | SSH/login/sudo/su/account changes | `auth_login`, `auth_logout`, `auth_failed`, `sudo`, `su`, `account_change` | journald, else auth.log/secure | done (0.10) |

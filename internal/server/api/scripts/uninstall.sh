@@ -27,6 +27,14 @@ if [[ -e /etc/systemd/system/xdr-agent.service.d/10-tamper-protection.conf ]]; t
   /usr/local/bin/xdr-agent maintenance --token "$TOKEN" || exit 1
 fi
 
+# A packaged agent (.deb/.rpm) is removed with its package manager, which
+# runs the same cleanup; the steps below then find little left to do.
+if dpkg-query -W -f='${Status}' xdr-agent 2>/dev/null | grep -q 'ok installed'; then
+  dpkg --purge xdr-agent || true
+elif rpm -q xdr-agent >/dev/null 2>&1; then
+  rpm -e xdr-agent || true
+fi
+
 if systemctl list-unit-files xdr-agent.service >/dev/null 2>&1; then
   systemctl disable --now xdr-agent 2>/dev/null || true
   nft delete table inet xdr_isolation 2>/dev/null || true
@@ -40,6 +48,16 @@ fi
 if [[ -s /var/lib/xdr-agent/devctl.json ]]; then
   for dev in $(grep -o '"[0-9][0-9.-]*":{' /var/lib/xdr-agent/devctl.json | tr -d '":{'); do
     [[ -w "/sys/bus/usb/devices/$dev/authorized" ]] && echo 1 > "/sys/bus/usb/devices/$dev/authorized" || true
+  done
+fi
+# Likewise USB disks made read-only, and filesystems remounted read-only on them.
+if [[ -s /var/lib/xdr-agent/devctl-ro.json ]]; then
+  for disk in $(grep -o '"[a-z0-9]*"' /var/lib/xdr-agent/devctl-ro.json | tr -d '"'); do
+    [[ -b "/dev/$disk" ]] || continue
+    blockdev --setrw "/dev/$disk" 2>/dev/null || true
+    awk -v d="/dev/$disk" '$1 == d && $4 ~ /(^|,)ro(,|$)/ { print $2 }' /proc/self/mounts | while read -r mnt; do
+      mount -o remount,rw "$(printf '%b' "$mnt")" 2>/dev/null || true
+    done
   done
 fi
 

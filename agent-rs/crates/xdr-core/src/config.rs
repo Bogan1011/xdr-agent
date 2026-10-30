@@ -22,6 +22,9 @@ pub struct Config {
     pub network_interval: Duration,
     /// Byte budget of the on-disk event queue.
     pub queue_bytes: u64,
+    /// Free disk space the queue never eats into; it shrinks below
+    /// queue_bytes when the state directory's filesystem runs low.
+    pub queue_disk_reserve_bytes: u64,
     pub batch_size: usize,
     pub log_level: String,
     /// Refuses remote shells from the console on this host.
@@ -71,6 +74,7 @@ impl Default for Config {
             max_file_watches: 8192,
             network_interval: Duration::from_secs(5),
             queue_bytes: 256 << 20,
+            queue_disk_reserve_bytes: 512 << 20,
             batch_size: 500,
             log_level: "info".into(),
             disable_remote_shell: false,

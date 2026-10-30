@@ -36,6 +36,7 @@ const FILE_DELETE: u32 = 3;
 const FILE_RENAME: u32 = 4;
 const FILE_CHMOD: u32 = 5;
 const NET_ACCEPT: u16 = 2;
+const NET_UDP_SEND: u16 = 3;
 
 const NAME_SLOT: usize = 128;
 const PATH_SLOTS: usize = 32;
@@ -56,6 +57,10 @@ pub struct Probes {
     _bpf: Ebpf,
     pub files: Option<RingBuf<MapData>>,
     pub net: Option<RingBuf<MapData>>,
+    /// The net ring carries TCP connects and accepts.
+    pub tcp: bool,
+    /// The net ring carries UDP sends.
+    pub udp: bool,
 }
 
 /// Loads and attaches the programs. A group whose hooks cannot all be
@@ -88,17 +93,30 @@ pub fn load() -> Result<Probes> {
     .map_err(|e| tracing::warn!("eBPF file hooks unavailable, using inotify: {e:#}"))
     .ok()
     .and_then(|_| ring(&mut bpf, "file_events"));
-    let net = attach(
+    let tcp = attach(
         &mut bpf,
         &[("net_connect", "tcp_connect"), ("net_accept", "inet_csk_accept")],
     )
-    .map_err(|e| tracing::warn!("eBPF network hooks unavailable, polling /proc/net: {e:#}"))
-    .ok()
-    .and_then(|_| ring(&mut bpf, "net_events"));
+    .map_err(|e| tracing::warn!("eBPF TCP hooks unavailable, polling /proc/net: {e:#}"))
+    .is_ok();
+    let udp = attach(
+        &mut bpf,
+        &[("net_udp_send", "udp_sendmsg"), ("net_udp6_send", "udpv6_sendmsg")],
+    )
+    .map_err(|e| tracing::warn!("eBPF UDP hooks unavailable, polling /proc/net: {e:#}"))
+    .is_ok();
+    let net = if tcp || udp { ring(&mut bpf, "net_events") } else { None };
+    let (tcp, udp) = if net.is_some() { (tcp, udp) } else { (false, false) };
     if files.is_none() && net.is_none() {
         return Err(anyhow!("no eBPF hooks could be attached"));
     }
-    Ok(Probes { _bpf: bpf, files, net })
+    Ok(Probes {
+        _bpf: bpf,
+        files,
+        net,
+        tcp,
+        udp,
+    })
 }
 
 /// Attaches every hook of a group, or none of them.
@@ -413,13 +431,19 @@ pub struct EbpfNetwork {
 
 fn net_event(r: NetRec) -> pb::Event {
     let accept = r.op == NET_ACCEPT;
+    let protocol = match (r.op == NET_UDP_SEND, r.v6) {
+        (false, false) => "tcp",
+        (false, true) => "tcp6",
+        (true, false) => "udp",
+        (true, true) => "udp6",
+    };
     let mut e = new_event(if accept {
         EventType::NetAccept
     } else {
         EventType::NetConnect
     });
     e.payload = Some(pb::event::Payload::Network(pb::NetworkEvent {
-        protocol: if r.v6 { "tcp6" } else { "tcp" }.into(),
+        protocol: protocol.into(),
         local_addr: r.local.to_string(),
         local_port: r.local_port.into(),
         remote_addr: r.remote.to_string(),
@@ -519,6 +543,12 @@ mod tests {
         b[14..16].copy_from_slice(&10u16.to_le_bytes());
         b[40..56].copy_from_slice(&Ipv4Addr::new(1, 2, 3, 4).to_ipv6_mapped().octets());
         assert_eq!(parse_net(&b).unwrap().remote.to_string(), "1.2.3.4");
+        // A UDP send is an outbound udp event.
+        b[12..14].copy_from_slice(&NET_UDP_SEND.to_le_bytes());
+        b[18..20].copy_from_slice(&53u16.to_be_bytes());
+        let e = net_event(parse_net(&b).unwrap());
+        let Some(pb::event::Payload::Network(n)) = e.payload else { panic!() };
+        assert_eq!((n.protocol.as_str(), n.remote_port, n.direction.as_str()), ("udp6", 53, "outbound"));
     }
 
     #[test]
@@ -585,5 +615,30 @@ mod live_tests {
         }
         let _ = std::fs::remove_file(&path);
         assert!(seen, "no eBPF event for {want}");
+    }
+
+    #[test]
+    #[ignore]
+    fn sees_a_udp_send() {
+        let mut p = load().expect("load eBPF");
+        assert!(p.udp, "UDP hooks attached");
+        let mut ring = p.net.take().unwrap();
+        // The agent's own process is filtered, so send from a child.
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg("exec 3<>/dev/udp/127.0.0.1/5999 && echo hi >&3")
+            .status()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut seen = false;
+        while Instant::now() < deadline && !seen {
+            while let Some(item) = ring.next() {
+                if parse_net(&item).is_some_and(|r| r.op == NET_UDP_SEND && r.remote_port == 5999) {
+                    seen = true;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(seen, "no eBPF UDP event");
     }
 }

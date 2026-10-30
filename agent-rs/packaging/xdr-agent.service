@@ -1,0 +1,21 @@
+[Unit]
+Description=XDR endpoint agent
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+ConditionPathExists=/etc/xdr-agent/agent.yaml
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/xdr-agent --config /etc/xdr-agent/agent.yaml
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+LimitNOFILE=65536
+Nice=5
+CPUWeight=50
+IOWeight=50
+OOMScoreAdjust=-500
+
+[Install]
+WantedBy=multi-user.target

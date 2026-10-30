@@ -84,9 +84,9 @@ impl Platform for Linux {
     }
 
     fn collectors(&self, cfg: &Config) -> Vec<Box<dyn Collector>> {
-        let (files_ebpf, net_ebpf) = match self.probes.lock().unwrap().as_mut() {
-            Some(p) => (p.files.take(), p.net.take()),
-            None => (None, None),
+        let (files_ebpf, net_ebpf, tcp_ebpf, udp_ebpf) = match self.probes.lock().unwrap().as_mut() {
+            Some(p) => (p.files.take(), p.net.take(), p.tcp, p.udp),
+            None => (None, None, false, false),
         };
         let writers = files_ebpf.is_some().then(|| Arc::new(writers::Writers::default()));
         let file: Box<dyn Collector> = match (files_ebpf, &writers) {
@@ -104,9 +104,9 @@ impl Platform for Linux {
                 hasher: self.hasher.clone(),
             }),
         };
-        let tcp_ebpf = net_ebpf.is_some();
+        let (tcp_ebpf, udp_ebpf) = if net_ebpf.is_some() { (tcp_ebpf, udp_ebpf) } else { (false, false) };
         let mut out: Vec<Box<dyn Collector>> = Vec::new();
-        if tcp_ebpf {
+        if net_ebpf.is_some() {
             out.push(Box::new(ebpf::EbpfNetwork { ring: net_ebpf }));
         }
         let rest: Vec<Box<dyn Collector>> = vec![
@@ -115,6 +115,7 @@ impl Platform for Linux {
             Box::new(network::Network {
                 interval: cfg.network_interval,
                 skip_tcp_connections: tcp_ebpf,
+                skip_udp_connections: udp_ebpf,
             }),
             Box::new(auth::Auth),
             Box::new(dns::Dns),

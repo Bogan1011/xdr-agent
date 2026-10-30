@@ -256,6 +256,32 @@ emitting ShellCommandEvent).
 - Uninstall (console or uninstall.sh) re-authorizes USB disks that device
   control blocked.
 
+### Release completion (0.10.8)
+
+- Offline queue: its budget is `min(queue_bytes, held + free disk -
+  queue_disk_reserve_bytes)` (agent.yaml, reserve default 512 MiB), checked
+  every 10 s, so a long outage never fills the host's disk. Shrinking and
+  recovery are logged once each.
+- UDP: kprobes on `udp_sendmsg`/`udpv6_sendmsg` report every UDP flow as
+  `net_connect` (protocol udp/udp6), once per process and destination per
+  minute (LRU map in the kernel). With them attached, /proc polling reports
+  only UDP listeners.
+- USB read-only: the disks device control made read-only are kept in
+  `devctl-ro.json`, so a restart, the console uninstall, uninstall.sh and
+  package removal all make them writable again and remount their filesystems
+  read-write.
+- Packages and arm64: the console image builds amd64 and arm64 agents
+  (arm64 cross-compiled with clang/lld against an apk-fetched musl sysroot;
+  build arg `AGENT_ARCHES=amd64` skips it) and `.deb`/`.rpm` packages of each
+  with nfpm (`agent-rs/packaging/`), served at `/downloads/`
+  (`PACKAGES.SHA256SUMS`). A package installs the binary and the unit; the
+  host enrolls with the console's install command plus `--config-only`.
+  Removing the package runs the uninstall cleanup (tamper protection needs a
+  maintenance window first); uninstall.sh and the console uninstall remove
+  a packaged agent through dpkg/rpm.
+- BPF objects: `make bpf` (clang) rebuilds `agent-rs/bpf/*.o`, which are
+  committed.
+
 ## Detection pipeline (0.9)
 
 Every `SendEvents` batch goes through `internal/server/pipeline`:

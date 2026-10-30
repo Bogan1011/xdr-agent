@@ -1,0 +1,37 @@
+# .deb and .rpm of the agent, built in the console image (see ../../Dockerfile):
+#   VERSION=0.10.8 ARCH=amd64 nfpm pkg -f nfpm.yaml -p deb -t <dir>
+# The package installs the binary and the service; the host enrolls once
+# /etc/xdr-agent/agent.yaml and ca.crt exist, written by
+#   install.sh --config-only (the console's install command) or by config management.
+name: xdr-agent
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: none
+maintainer: Ironsight XDR <noreply@localhost>
+description: Ironsight XDR endpoint agent for Linux
+vendor: Ironsight
+license: Proprietary
+contents:
+  # Same path as the script installer, so tamper protection, self-update and
+  # uninstall.sh work the same on packaged hosts.
+  - src: ./xdr-agent
+    dst: /usr/local/bin/xdr-agent
+    file_info:
+      mode: 0755
+  - src: ./xdr-agent.service
+    dst: /usr/lib/systemd/system/xdr-agent.service
+    file_info:
+      mode: 0644
+  - dst: /var/lib/xdr-agent
+    type: dir
+    file_info:
+      mode: 0700
+  - dst: /etc/xdr-agent
+    type: dir
+    file_info:
+      mode: 0700
+scripts:
+  postinstall: ./postinstall.sh
+  preremove: ./preremove.sh
+  postremove: ./postremove.sh
