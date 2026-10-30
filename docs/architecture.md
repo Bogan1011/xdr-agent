@@ -231,9 +231,56 @@ download over mTLS, SHA-256 and `-version` check, atomic swap, exit so
 systemd restarts it, rollback to the previous binary when the new one does
 not reach the console within 3 minutes or 3 starts), eBPF CO-RE collectors
 (done in 0.10.4, see below), YARA scanning and detection content (done in
-0.10.5), prevention modules and tamper protection (done in 0.10.6), PAM, live shell and
+0.10.5), prevention modules and tamper protection (done in 0.10.6), release
+hardening (0.10.7: see below), PAM, live shell and
 activity (done in 0.10.3), bash command telemetry (uprobes on readline and parse_and_execute,
 emitting ShellCommandEvent).
+
+### Agent resilience (0.10.7)
+
+- Core tasks (bus, uploader, heartbeat, live stream, scanner) are
+  supervised: if one ends or panics the agent exits with code 70 and
+  systemd restarts it. Collectors restart on their own after a panic, and a
+  panic in prevention skips only that event.
+- Memory watchdog: when the agent's own RSS stays above `max_memory_bytes`
+  (agent.yaml, default 1 GiB, 0 off) for a minute it exits with code 71.
+  Remote shells and other children are not counted.
+- Uploader: a batch the console rejects as InvalidArgument, ResourceExhausted
+  or OutOfRange is halved until it goes through, and a single event that is
+  still rejected is dropped, so one bad event cannot stall the queue. Losing
+  and regaining the console are logged once each, with the queue length.
+- systemd: the agent keeps `xdr-agent.service.d/20-hardening.conf`
+  (no start-rate limit, Restart=always, CPUWeight/IOWeight 50,
+  TimeoutStopSec=30) so older installs get it with an update. install.sh
+  writes the same settings and fails when the agent does not stay up.
+- Uninstall (console or uninstall.sh) re-authorizes USB disks that device
+  control blocked.
+
+### Release completion (0.10.8)
+
+- Offline queue: its budget is `min(queue_bytes, held + free disk -
+  queue_disk_reserve_bytes)` (agent.yaml, reserve default 512 MiB), checked
+  every 10 s, so a long outage never fills the host's disk. Shrinking and
+  recovery are logged once each.
+- UDP: kprobes on `udp_sendmsg`/`udpv6_sendmsg` report every UDP flow as
+  `net_connect` (protocol udp/udp6), once per process and destination per
+  minute (LRU map in the kernel). With them attached, /proc polling reports
+  only UDP listeners.
+- USB read-only: the disks device control made read-only are kept in
+  `devctl-ro.json`, so a restart, the console uninstall, uninstall.sh and
+  package removal all make them writable again and remount their filesystems
+  read-write.
+- Packages and arm64: the console image builds amd64 and arm64 agents
+  (arm64 cross-compiled with clang/lld against an apk-fetched musl sysroot;
+  build arg `AGENT_ARCHES=amd64` skips it) and `.deb`/`.rpm` packages of each
+  with nfpm (`agent-rs/packaging/`), served at `/downloads/`
+  (`PACKAGES.SHA256SUMS`). A package installs the binary and the unit; the
+  host enrolls with the console's install command plus `--config-only`.
+  Removing the package runs the uninstall cleanup (tamper protection needs a
+  maintenance window first); uninstall.sh and the console uninstall remove
+  a packaged agent through dpkg/rpm.
+- BPF objects: `make bpf` (clang) rebuilds `agent-rs/bpf/*.o`, which are
+  committed.
 
 ## Detection pipeline (0.9)
 

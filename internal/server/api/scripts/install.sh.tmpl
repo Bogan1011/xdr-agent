@@ -14,6 +14,9 @@ AGENT_PORT="{{.AgentPort}}"
 TOKEN=""
 CA_SHA256=""
 MAINT_TOKEN=""
+# --config-only: the agent is already installed (from the .deb/.rpm); only
+# write its CA and enrollment config, then start it.
+CONFIG_ONLY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -22,6 +25,7 @@ while [[ $# -gt 0 ]]; do
     --server-host) SERVER_HOST="$2"; shift 2 ;;
     --base-url) BASE_URL="$2"; shift 2 ;;
     --maintenance-token) MAINT_TOKEN="$2"; shift 2 ;;
+    --config-only) CONFIG_ONLY=1; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -50,12 +54,16 @@ curl -fsSL "$BASE_URL/pki/ca.crt" -o "$TMP/ca.crt"
 GOT="$(openssl x509 -in "$TMP/ca.crt" -outform der | sha256sum | cut -d' ' -f1)"
 [[ "${GOT,,}" == "${CA_SHA256,,}" ]] || die "CA fingerprint mismatch (got $GOT); refusing to install"
 
-echo "==> Downloading agent ($ARCH)"
-curl -fsSL "$BASE_URL/downloads/xdr-agent-linux-$ARCH" -o "$TMP/xdr-agent" || die "this console has no agent build for $ARCH"
-curl -fsSL "$BASE_URL/downloads/SHA256SUMS" -o "$TMP/SHA256SUMS"
-WANT="$(grep " xdr-agent-linux-$ARCH\$" "$TMP/SHA256SUMS" | cut -d' ' -f1)"
-GOT="$(sha256sum "$TMP/xdr-agent" | cut -d' ' -f1)"
-[[ -n "$WANT" && "$WANT" == "$GOT" ]] || die "agent checksum mismatch"
+if [[ $CONFIG_ONLY -eq 1 ]]; then
+  [[ -x /usr/local/bin/xdr-agent ]] || die "--config-only: install the xdr-agent package first"
+else
+  echo "==> Downloading agent ($ARCH)"
+  curl -fsSL "$BASE_URL/downloads/xdr-agent-linux-$ARCH" -o "$TMP/xdr-agent" || die "this console has no agent build for $ARCH"
+  curl -fsSL "$BASE_URL/downloads/SHA256SUMS" -o "$TMP/SHA256SUMS"
+  WANT="$(grep " xdr-agent-linux-$ARCH\$" "$TMP/SHA256SUMS" | cut -d' ' -f1)"
+  GOT="$(sha256sum "$TMP/xdr-agent" | cut -d' ' -f1)"
+  [[ -n "$WANT" && "$WANT" == "$GOT" ]] || die "agent checksum mismatch"
+fi
 
 # A protected agent refuses to be stopped or overwritten until the console's
 # maintenance token suspends its tamper protection.
@@ -68,7 +76,7 @@ if systemctl is-active --quiet xdr-agent; then
   systemctl stop xdr-agent
 fi
 
-install -m 0755 "$TMP/xdr-agent" /usr/local/bin/xdr-agent
+[[ $CONFIG_ONLY -eq 1 ]] || install -m 0755 "$TMP/xdr-agent" /usr/local/bin/xdr-agent
 install -d -m 0700 /etc/xdr-agent /var/lib/xdr-agent
 install -m 0644 "$TMP/ca.crt" /etc/xdr-agent/ca.crt
 
@@ -83,19 +91,24 @@ state_dir: /var/lib/xdr-agent
 EOF
 chmod 0600 /etc/xdr-agent/agent.yaml
 
-cat > /etc/systemd/system/xdr-agent.service <<'EOF'
+# The package ships its own unit in /usr/lib/systemd/system.
+[[ $CONFIG_ONLY -eq 1 && -e /usr/lib/systemd/system/xdr-agent.service ]] || cat > /etc/systemd/system/xdr-agent.service <<'EOF'
 [Unit]
 Description=XDR endpoint agent
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/xdr-agent --config /etc/xdr-agent/agent.yaml
 Restart=always
 RestartSec=5
+TimeoutStopSec=30
 LimitNOFILE=65536
 Nice=5
+CPUWeight=50
+IOWeight=50
 OOMScoreAdjust=-500
 
 [Install]
@@ -107,4 +120,12 @@ rm -f /var/lib/xdr-agent/maintenance.json
 
 systemctl daemon-reload
 systemctl enable --now xdr-agent
-echo "==> xdr-agent installed and started. Logs: journalctl -u xdr-agent -f"
+
+# Fail the install (and a remote install from the console) when the agent
+# does not stay up, with its log, instead of reporting success.
+sleep 5
+if ! systemctl is-active --quiet xdr-agent; then
+  journalctl -u xdr-agent -n 30 --no-pager >&2 || true
+  die "the agent did not stay running; see the log above"
+fi
+echo "==> xdr-agent installed and running. Logs: journalctl -u xdr-agent -f"

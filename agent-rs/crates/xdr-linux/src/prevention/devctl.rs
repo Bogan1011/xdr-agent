@@ -88,6 +88,12 @@ impl DeviceControl {
             .ok()
             .and_then(|raw| serde_json::from_slice(&raw).ok())
             .unwrap_or_default();
+        // Disks made read-only before a restart; the first scan gives back
+        // the ones the policy no longer wants read-only.
+        let ro = std::fs::read(ro_file(&file))
+            .ok()
+            .and_then(|raw| serde_json::from_slice(&raw).ok())
+            .unwrap_or_default();
         let (tx, rx) = mpsc::sync_channel(1);
         DeviceControl {
             emit,
@@ -98,7 +104,7 @@ impl DeviceControl {
                 pol: None,
                 blocked,
                 seen: HashSet::new(),
-                ro: HashSet::new(),
+                ro,
             }),
             tx,
             rx: Mutex::new(Some(rx)),
@@ -178,6 +184,7 @@ impl DeviceControl {
         let read_only = enabled && pol.usb_storage == policy::USB_READ_ONLY;
         let allowed: HashSet<&str> = pol.allowed_devices.iter().map(String::as_str).collect();
         let mut changed = false;
+        let ro_before = i.ro.clone();
 
         // Release what the policy no longer blocks, or what was unplugged.
         for (name, dev) in i.blocked.clone() {
@@ -244,12 +251,16 @@ impl DeviceControl {
                 self.event("connected", dev);
             }
         }
-        // Make writable again what is unplugged or no longer read-only.
+        // Make writable again what is unplugged or no longer read-only; not
+        // before the policy is known, so a restart leaves no writable window.
         for b in i.ro.clone() {
-            if !want_ro.contains(&b) {
+            if i.pol.is_some() && !want_ro.contains(&b) {
                 let _ = (self.set_read_only)(&b, false);
                 i.ro.remove(&b);
             }
+        }
+        if i.ro != ro_before {
+            self.save_ro(&i.ro);
         }
         let blocked: HashSet<String> = i.blocked.keys().cloned().collect();
         i.seen.retain(|k| {
@@ -306,6 +317,35 @@ impl DeviceControl {
         self.emit.emit(e);
     }
 
+    /// Gives back every device it blocked or made read-only and stops
+    /// enforcing, before an uninstall: a blocked USB disk would otherwise
+    /// stay unusable until it is replugged.
+    pub fn release_all(&self) {
+        let mut i = self.inner.lock().unwrap();
+        i.pol = None;
+        for name in std::mem::take(&mut i.blocked).into_keys() {
+            if let Err(err) = self.authorize(&name, true) {
+                tracing::warn!(device = %name, "re-authorizing USB device failed: {err}");
+            }
+        }
+        for b in std::mem::take(&mut i.ro) {
+            let _ = (self.set_read_only)(&b, false);
+        }
+        let _ = std::fs::remove_file(&self.file);
+        let _ = std::fs::remove_file(ro_file(&self.file));
+    }
+
+    /// Records the read-only disks so a restart, and uninstall.sh when the
+    /// agent is gone, can make them writable again.
+    fn save_ro(&self, ro: &HashSet<String>) {
+        let path = ro_file(&self.file);
+        if ro.is_empty() {
+            let _ = std::fs::remove_file(path);
+        } else if let Ok(raw) = serde_json::to_vec(&ro.iter().collect::<std::collections::BTreeSet<_>>()) {
+            let _ = super::fim::write_private(&path, &raw);
+        }
+    }
+
     /// Whether the module is on and how many devices it blocks.
     pub fn status(&self) -> (bool, usize) {
         let i = self.inner.lock().unwrap();
@@ -360,8 +400,13 @@ fn uevents(tx: &mpsc::SyncSender<()>) -> Result<()> {
     }
 }
 
-/// Sets the kernel's read-only flag on /dev/<dev> and, when making it
-/// read-only, remounts filesystems already mounted from it.
+/// devctl-ro.json next to devctl.json: a JSON list of disk names.
+fn ro_file(file: &Path) -> PathBuf {
+    file.with_file_name("devctl-ro.json")
+}
+
+/// Sets the kernel's read-only flag on /dev/<dev> and remounts filesystems
+/// mounted from it to match.
 fn set_block_read_only(dev: &str, ro: bool) -> Result<()> {
     use std::os::fd::AsRawFd;
     const BLKROSET: libc::c_ulong = 0x125d;
@@ -370,25 +415,23 @@ fn set_block_read_only(dev: &str, ro: bool) -> Result<()> {
     if unsafe { libc::ioctl(f.as_raw_fd(), BLKROSET as _, &v) } < 0 {
         bail!("BLKROSET /dev/{dev}: {}", std::io::Error::last_os_error());
     }
-    if !ro {
-        return Ok(());
-    }
     let mounts = std::fs::read_to_string("/proc/self/mounts").unwrap_or_default();
     let want = format!("/dev/{dev}");
+    let opt = if ro { "remount,ro" } else { "remount,rw" };
     for line in mounts.lines() {
         let f: Vec<&str> = line.split_whitespace().collect();
-        if f.len() < 2 || f[0] != want {
+        if f.len() < 4 || f[0] != want {
+            continue;
+        }
+        // Writable again: only mounts that are read-only now (ours, or
+        // mounted while the disk was read-only) need a remount.
+        if !ro && !f[3].split(',').any(|o| o == "ro") {
             continue;
         }
         let dir = super::fanotify::unescape_mount(f[1]);
-        let out = std::process::Command::new("mount")
-            .args(["-o", "remount,ro", &dir])
-            .output()?;
+        let out = std::process::Command::new("mount").args(["-o", opt, &dir]).output()?;
         if !out.status.success() {
-            bail!(
-                "remount {dir} read-only: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            );
+            bail!("remount {dir} {opt}: {}", String::from_utf8_lossy(&out.stderr).trim());
         }
     }
     Ok(())
@@ -468,9 +511,47 @@ mod tests {
         assert_eq!(dc.block_devices("1-1"), vec!["sdb", "sdb1"]);
         let calls = RO_CALLS.lock().unwrap().clone();
         assert!(calls.contains(&("sdb".into(), true)) && calls.contains(&("sdb1".into(), true)));
+        // The read-only disks are on disk for restarts and uninstall.sh.
+        let saved: Vec<String> =
+            serde_json::from_slice(&std::fs::read(tmp.path().join("devctl-ro.json")).unwrap()).unwrap();
+        assert_eq!(saved, vec!["sdb", "sdb1"]);
+        let again = DeviceControl::with_root(
+            Emitter::default(),
+            tmp.path().join("devctl.json"),
+            root.clone(),
+            fake_ro,
+        );
+        assert_eq!(again.inner.lock().unwrap().ro.len(), 2);
         pol.usb_storage = "allow".into();
         dc.set_policy(&pol);
         dc.scan();
         assert!(RO_CALLS.lock().unwrap().contains(&("sdb1".into(), false)));
+        assert!(!tmp.path().join("devctl-ro.json").exists());
+    }
+
+    #[test]
+    fn release_all_unblocks_for_uninstall() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("usb");
+        fake_usb(&root, "2-1", ("0781", "5584"));
+        let dc = DeviceControl::with_root(
+            Emitter::default(),
+            tmp.path().join("devctl.json"),
+            root.clone(),
+            fake_ro,
+        );
+        dc.set_policy(&pb::DeviceControlPolicy {
+            enabled: true,
+            usb_storage: "block".into(),
+            ..Default::default()
+        });
+        dc.scan();
+        assert_eq!(read_sys(root.join("2-1/authorized")), "0");
+        dc.release_all();
+        assert_eq!(read_sys(root.join("2-1/authorized")), "1");
+        assert_eq!(dc.status(), (false, 0));
+        assert!(!tmp.path().join("devctl.json").exists());
+        dc.scan();
+        assert_eq!(read_sys(root.join("2-1/authorized")), "1");
     }
 }

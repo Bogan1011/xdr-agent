@@ -5,7 +5,8 @@
 //   file_events: file create, write-open, delete, rename and chmod with the
 //                acting process, from the LSM path hooks (CONFIG_SECURITY_PATH)
 //   net_events:  every TCP connect and accept with the acting process, so
-//                short connections are not missed between /proc polls
+//                short connections are not missed between /proc polls, and
+//                UDP sends, once per process and destination a minute
 //
 // Paths are sent as name slots from the leaf up to the root; user space
 // reverses them. Event layouts must match ../events.go.
@@ -41,6 +42,7 @@ enum file_op {
 enum net_op {
 	NET_CONNECT = 1,
 	NET_ACCEPT = 2,
+	NET_UDP_SEND = 3,
 };
 
 struct file_event {
@@ -80,6 +82,24 @@ struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 1 << 20);
 } net_events SEC(".maps");
+
+// UDP has no connection to hook, so sends are reported once per process and
+// destination per UDP_REPEAT_NS; this map remembers when each was last sent.
+#define UDP_REPEAT_NS (60ULL * 1000000000ULL)
+
+struct udp_key {
+	u32 tgid;
+	u16 family;
+	u16 rport;
+	u8 raddr[16];
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, 16384);
+	__type(key, struct udp_key);
+	__type(value, u64);
+} udp_seen SEC(".maps");
 
 // Set by the loader so the agent's own activity is not reported.
 volatile const u32 agent_tgid = 0;
@@ -256,4 +276,80 @@ SEC("kretprobe/inet_csk_accept")
 int net_accept(struct pt_regs *ctx)
 {
 	return emit_net(NET_ACCEPT, (struct sock *)PT_REGS_RC(ctx));
+}
+
+// udp_sendmsg(struct sock *sk, struct msghdr *msg, size_t len), and its IPv6
+// twin. The destination is msg_name for an unconnected socket and the socket's
+// peer otherwise. The local port is 0 on an unbound socket's first send.
+static __always_inline int emit_udp(struct sock *sk, struct msghdr *msg)
+{
+	if (!sk || skip_self())
+		return 0;
+	u16 family = BPF_CORE_READ(sk, __sk_common.skc_family);
+	if (family != AF_INET && family != AF_INET6)
+		return 0;
+	struct udp_key k = {};
+	k.tgid = bpf_get_current_pid_tgid() >> 32;
+	k.family = family;
+	void *name = BPF_CORE_READ(msg, msg_name);
+	if (name) {
+		u16 af = 0;
+		bpf_probe_read_kernel(&af, sizeof(af), name);
+		if (af == AF_INET) {
+			struct sockaddr_in *sin = name;
+			k.rport = BPF_CORE_READ(sin, sin_port);
+			bpf_core_read(k.raddr, 4, &sin->sin_addr);
+			k.family = AF_INET;
+		} else if (af == AF_INET6) {
+			struct sockaddr_in6 *sin6 = name;
+			k.rport = BPF_CORE_READ(sin6, sin6_port);
+			bpf_core_read(k.raddr, 16, &sin6->sin6_addr);
+			k.family = AF_INET6;
+		} else {
+			return 0;
+		}
+	} else {
+		k.rport = BPF_CORE_READ(sk, __sk_common.skc_dport);
+		if (family == AF_INET)
+			bpf_core_read(k.raddr, 4, &sk->__sk_common.skc_daddr);
+		else
+			bpf_core_read(k.raddr, 16, &sk->__sk_common.skc_v6_daddr);
+	}
+	if (!k.rport)
+		return 0;
+	u64 now = bpf_ktime_get_ns();
+	u64 *last = bpf_map_lookup_elem(&udp_seen, &k);
+	if (last && now - *last < UDP_REPEAT_NS)
+		return 0;
+	bpf_map_update_elem(&udp_seen, &k, &now, 0);
+
+	struct net_event *e = bpf_ringbuf_reserve(&net_events, sizeof(*e), 0);
+	if (!e)
+		return 0;
+	fill_task(&e->pid, &e->ppid, &e->uid, e->comm);
+	e->op = NET_UDP_SEND;
+	e->family = k.family;
+	e->_pad = 0;
+	e->lport = BPF_CORE_READ(sk, __sk_common.skc_num);
+	e->rport = k.rport;
+	__builtin_memset(e->laddr, 0, sizeof(e->laddr));
+	if (family == AF_INET)
+		bpf_core_read(e->laddr, 4, &sk->__sk_common.skc_rcv_saddr);
+	else
+		bpf_core_read(e->laddr, 16, &sk->__sk_common.skc_v6_rcv_saddr);
+	__builtin_memcpy(e->raddr, k.raddr, sizeof(e->raddr));
+	bpf_ringbuf_submit(e, 0);
+	return 0;
+}
+
+SEC("kprobe/udp_sendmsg")
+int net_udp_send(struct pt_regs *ctx)
+{
+	return emit_udp((struct sock *)PT_REGS_PARM1(ctx), (struct msghdr *)PT_REGS_PARM2(ctx));
+}
+
+SEC("kprobe/udpv6_sendmsg")
+int net_udp6_send(struct pt_regs *ctx)
+{
+	return emit_udp((struct sock *)PT_REGS_PARM1(ctx), (struct msghdr *)PT_REGS_PARM2(ctx));
 }

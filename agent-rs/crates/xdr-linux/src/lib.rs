@@ -22,7 +22,9 @@ pub mod process;
 pub mod procfs;
 pub mod resolver;
 pub mod response;
+pub mod service;
 pub mod shell;
+pub mod writers;
 
 use std::sync::Arc;
 
@@ -82,27 +84,29 @@ impl Platform for Linux {
     }
 
     fn collectors(&self, cfg: &Config) -> Vec<Box<dyn Collector>> {
-        let (files_ebpf, net_ebpf) = match self.probes.lock().unwrap().as_mut() {
-            Some(p) => (p.files.take(), p.net.take()),
-            None => (None, None),
+        let (files_ebpf, net_ebpf, tcp_ebpf, udp_ebpf) = match self.probes.lock().unwrap().as_mut() {
+            Some(p) => (p.files.take(), p.net.take(), p.tcp, p.udp),
+            None => (None, None, false, false),
         };
-        let file: Box<dyn Collector> = match files_ebpf {
-            Some(ring) => Box::new(ebpf::EbpfFile {
+        let writers = files_ebpf.is_some().then(|| Arc::new(writers::Writers::default()));
+        let file: Box<dyn Collector> = match (files_ebpf, &writers) {
+            (Some(ring), Some(w)) => Box::new(ebpf::EbpfFile {
                 ring: Some(ring),
                 paths: cfg.file_paths.clone(),
                 exclude: cfg.file_exclude.clone(),
                 hasher: self.hasher.clone(),
+                writers: w.clone(),
             }),
-            None => Box::new(file::File {
+            _ => Box::new(file::File {
                 paths: cfg.file_paths.clone(),
                 exclude: cfg.file_exclude.clone(),
                 max_watches: cfg.max_file_watches,
                 hasher: self.hasher.clone(),
             }),
         };
-        let tcp_ebpf = net_ebpf.is_some();
+        let (tcp_ebpf, udp_ebpf) = if net_ebpf.is_some() { (tcp_ebpf, udp_ebpf) } else { (false, false) };
         let mut out: Vec<Box<dyn Collector>> = Vec::new();
-        if tcp_ebpf {
+        if net_ebpf.is_some() {
             out.push(Box::new(ebpf::EbpfNetwork { ring: net_ebpf }));
         }
         let rest: Vec<Box<dyn Collector>> = vec![
@@ -111,6 +115,7 @@ impl Platform for Linux {
             Box::new(network::Network {
                 interval: cfg.network_interval,
                 skip_tcp_connections: tcp_ebpf,
+                skip_udp_connections: udp_ebpf,
             }),
             Box::new(auth::Auth),
             Box::new(dns::Dns),
@@ -130,6 +135,7 @@ impl Platform for Linux {
             }),
             Box::new(persistence::Persistence {
                 hasher: self.hasher.clone(),
+                writers,
             }),
         ];
         out.extend(rest);
@@ -145,6 +151,7 @@ impl Platform for Linux {
             pb::CommandType::FimRebaseline => self.prevention.fim.rebaseline(),
             pb::CommandType::Uninstall => {
                 self.prevention.tamper.release();
+                self.prevention.dev.release_all();
                 self.responder.respond(c)
             }
             _ => self.responder.respond(c),
@@ -182,6 +189,7 @@ impl Platform for Linux {
 
     fn restore(&self) {
         migrate::cleanup_go_agent();
+        service::ensure_hardening();
         self.responder.restore_isolation();
     }
 

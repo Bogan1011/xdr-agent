@@ -22,6 +22,9 @@ pub struct Config {
     pub network_interval: Duration,
     /// Byte budget of the on-disk event queue.
     pub queue_bytes: u64,
+    /// Free disk space the queue never eats into; it shrinks below
+    /// queue_bytes when the state directory's filesystem runs low.
+    pub queue_disk_reserve_bytes: u64,
     pub batch_size: usize,
     pub log_level: String,
     /// Refuses remote shells from the console on this host.
@@ -30,6 +33,9 @@ pub struct Config {
     pub ebpf: String,
     /// Largest file the YARA scanner reads.
     pub scan_max_bytes: u64,
+    /// The agent restarts itself when its resident memory stays above this
+    /// for a minute (a leak or runaway buffer); 0 turns the check off.
+    pub max_memory_bytes: u64,
     /// The file this was loaded from.
     #[serde(skip)]
     pub config_path: PathBuf,
@@ -68,11 +74,13 @@ impl Default for Config {
             max_file_watches: 8192,
             network_interval: Duration::from_secs(5),
             queue_bytes: 256 << 20,
+            queue_disk_reserve_bytes: 512 << 20,
             batch_size: 500,
             log_level: "info".into(),
             disable_remote_shell: false,
             ebpf: String::new(),
             scan_max_bytes: 32 << 20,
+            max_memory_bytes: 1 << 30,
             config_path: PathBuf::new(),
         }
     }
